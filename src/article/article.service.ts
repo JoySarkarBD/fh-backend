@@ -10,10 +10,25 @@ import { UpdateArticleDto } from './dto/update-article.dto';
 
 export class ArticleService {
 
+
+  /**
+   * Article Service handles Create Article,Get Article Delete and update.
+   *
+ 
+   * @param ArticleModel Mongoose model for Article  schema
+   */
+
  constructor(
     @InjectModel(Article.name) private readonly ArticleModel: Model<Article>,
 
   ) {}
+
+    /**
+   * Create a New Article 
+   *
+   * @param CreateArticleDto data - Article  data including image, title, blog details etc.
+   * @returns a success message on completion
+   */
   async create(createArticleDto: CreateArticleDto) {
   const newArticle = new this.ArticleModel(createArticleDto)
  return await newArticle.save();
