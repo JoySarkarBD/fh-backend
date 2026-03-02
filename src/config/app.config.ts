@@ -10,6 +10,10 @@ interface config {
   STRIPE_SECRET_KEY: string;
   STRIPE_PRICE_ID: string;
   STRIPE_WEBHOOK_SECRET: string;
+  MAIL_USER:string;
+  MAIL_PASS: string;
+  MAIL_HOST:string;
+  MAIL_PORT:string
 }
 export const config: config = {
   PORT: parseInt(process.env.PORT as string, 10) || 5000,
@@ -23,4 +27,8 @@ export const config: config = {
   STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY as string,
   STRIPE_PRICE_ID: process.env.STRIPE_PRICE_ID as string,
   STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET as string,
+  MAIL_USER:process.env.MAIL_USER as string,
+  MAIL_PASS:process.env.MAIL_PASS as string,
+  MAIL_HOST: process.env.MAIL_HOST as string,
+  MAIL_PORT : process.env.MAIL_PORT as string,
 };

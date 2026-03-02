@@ -10,6 +10,7 @@ import { ServiceModule } from './service/service.module';
 import { PaymentModule } from './payment/payment.module';
 import { MaintenanceModule } from './maintenance/maintenance.module';
 import { ArticleModule } from './article/article.module';
+import { MailModule } from './mail/mail.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { ArticleModule } from './article/article.module';
     PaymentModule,
     MaintenanceModule,
     ArticleModule,
+    MailModule,
   ],
 
   controllers: [],

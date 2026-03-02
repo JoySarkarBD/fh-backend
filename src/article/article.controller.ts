@@ -39,8 +39,13 @@ export class ArticleController {
     return this.articleService.update(id, updateArticleDto);
   }
 
+
+
+
+  @UseGuards(JwtAuthGuard)
+  @Roles(UserRole.ADMIN)
   @Delete(':id')
   remove(@Param('id') id: string) {
-    return this.articleService.remove(+id);
+    return this.articleService.remove(id);
   }
 }
