@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { Roles } from 'src/auth/decorators/roles.decorator';
 import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
 import { UserRole } from 'src/schemas/user.schema';
@@ -21,9 +21,9 @@ export class ArticleController {
 
 
 
-  @Get()
-  findAll() {
-    return this.articleService.findAll();
+@Get()
+  async findAll( @Query() query: Record<string, any>) {
+    return await this.articleService.findAll(query);
   }
 
   @Get(':id')

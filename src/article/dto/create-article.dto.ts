@@ -19,6 +19,7 @@ export class CreateArticleDto {
   @IsNotEmpty({ message: 'Image is required.' })
   image: string;
 
-  @IsEnum(ArticleCategory, { message: 'Category must be a valid article category.' })
+  @IsEnum(ArticleCategory, { message: 'Category must be one of: SELLING_TIPS, BUYING_GUIDE, MARKET_ANALYSIS.' })
+  @IsNotEmpty({ message: 'Category is required.' })
   category: ArticleCategory;
 }

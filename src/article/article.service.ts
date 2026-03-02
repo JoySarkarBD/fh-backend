@@ -34,9 +34,50 @@ export class ArticleService {
  return await newArticle.save();
   }
 
-  findAll() {
-    return `This action returns all article`;
-  }
+
+  /**
+ * Create a New Article
+ *
+ * This method accepts article details and saves a new article to the database.
+ *
+ * @param {CreateArticleDto} data - The article data including:
+ *   - title: The title of the article (string, required)
+ *   - publishDate: The publish date of the article (string, optional)
+ *   - blogDetails: The main content/details of the article (string, required)
+ *   - image: URL of the article image (string, required)
+ *   - category: Article category (enum: SELLING_TIPS, BUYING_GUIDE, MARKET_ANALYSIS)
+ *
+ * @returns {Promise<{ message: string; articleId: string }>} 
+ *   Returns a success message and the ID of the newly created article.
+ *
+ * @throws {BadRequestException} If validation fails or required fields are missing.
+ */
+
+ async findAll(query) {
+  const { limit = 10, page = 1 } = query; // default values
+  const skip = (page - 1) * limit;
+
+  // Assuming you are using Mongoose model Article
+  const articles = await this.ArticleModel
+    .find()
+    .sort({ publishDate: -1 }) // newest first
+    .skip(skip)
+    .limit(Number(limit));
+
+  const total = await this.ArticleModel.countDocuments();
+
+  return {
+    data: articles,
+    pagination: {
+      total,
+      page: Number(page),
+      limit: Number(limit),
+      totalPages: Math.ceil(total / limit),
+      hasNextPage: page * limit < total,
+      hasPrevPage: page > 1,
+    },
+  };
+}
 
   findOne(id: number) {
     return `This action returns a #${id} article`;
