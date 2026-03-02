@@ -24,6 +24,6 @@ export class Article {
   blogDetails: string
 
   @Prop({required:true})
-  category:ArticleCategory
+  category:ArticleCategory  
    
 }
