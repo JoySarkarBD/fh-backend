@@ -113,7 +113,17 @@ export class ArticleService {
 
     return updatedArticle;
   }
-  remove(id: number) {
-    return `This action removes a #${id} article`;
+   /**
+   * Delete an article by ID
+   *
+   * @param {string} id - Article ID
+   * @returns {Promise<void>} Resolves if deleted successfully
+   * @throws {NotFoundException} If article not found
+   */
+  async remove(id: string): Promise<void> {
+    const deletedArticle = await this.ArticleModel.findByIdAndDelete(id).exec();
+    if (!deletedArticle) {
+      throw new NotFoundException(`Article with ID ${id} not found`);
+    }
   }
 }
