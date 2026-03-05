@@ -1,21 +1,42 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
 
+export type PropertyDocument = HydratedDocument<Property>;
+
 export enum PropertyStatus {
   PENDING = 'pending',
   ACTIVE = 'active',
   BAN = 'ban',
 }
 
+/**
+ * Image Sub Schema
+ */
+@Schema({ _id: false })
+export class ImageItem {
+  @Prop({ required: true })
+  key: string; // s3 object key
 
+  @Prop({ required: true })
+  image: string;
+}
+
+export const ImageItemSchema = SchemaFactory.createForClass(ImageItem);
+
+/**
+ * Property Schema
+ */
 @Schema({ timestamps: true })
 export class Property {
-
-  //Property Name
+  /**
+   * Property Name
+   */
   @Prop({ required: true, trim: true })
   propertyName: string;
 
-  // property status - by deafult active
+  /**
+   * Property Status
+   */
   @Prop({
     required: true,
     enum: PropertyStatus,
@@ -23,70 +44,108 @@ export class Property {
   })
   status: PropertyStatus;
 
-  // overview  Receive Quil Js
-
-  @Prop({ required: true, type: String })
+  /**
+   * Overview (QuillJS HTML)
+   */
+  @Prop({ required: true })
   overview: string;
 
-  // Key features: Receive Quil Js
-  @Prop({ required:  true, type: String })
+  /**
+   * Key Features (QuillJS HTML)
+   */
+  @Prop({ required: true })
   keyFeatures: string;
 
-  // Bedrooms
-  @Prop({ required: true, type: Number, min: 0 })
+  /**
+   * Bedrooms
+   */
+  @Prop({ required: true, min: 0 })
   bedrooms: number;
 
-  //Bathrooms
-  @Prop({ required: true, type: Number, min: 0 })
+  /**
+   * Bathrooms
+   */
+  @Prop({ required: true, min: 0 })
   bathrooms: number;
 
-  // Square Feet
-  @Prop({ required: true, type: Number, min: 0 })
+  /**
+   * Square Feet
+   */
+  @Prop({ required: true, min: 0 })
   squareFeet: number;
 
-  // Lot size
-  @Prop({ required: true, type: Number, min: 0 })
+  /**
+   * Lot Size
+   */
+  @Prop({ min: 0 })
   lotSize: number;
 
-  //Price
-  @Prop({ required: true, type: Number, min: 0 })
+  /**
+   * Price
+   */
+  @Prop({ required: true, min: 0 })
   price: number;
 
-
-  //Year Built
-  @Prop({ required: true, type: Number })
+  /**
+   * Year Built
+   */
+  @Prop({
+    required: true,
+    min: 1800,
+    max: new Date().getFullYear(),
+  })
   yearBuilt: number;
 
-  // More details: Receive Quil Js
-  @Prop({ required: true, type: String })
+  /**
+   * More Details (QuillJS HTML)
+   */
+  @Prop({ required: true })
   moreDetails: string;
-  
-// Location Map Link
-  @Prop({ type: String, default: '' })
+
+  /**
+   * Location Map Link
+   */
+  @Prop({ default: '' })
   locationMapLink: string;
 
-  // Is Posted - By default false
-  @Prop({ type: Boolean, default: false })
-  isPosted:boolean
+  /**
+   * Publish Status
+   */
+  @Prop({ default: false })
+  isPublished: boolean;
 
-  // !Schdhedule 
-  @Prop({type:String, required:false})
-   sellPostingDate:string
-   
-   @Prop({type:String, required:false})
-   sellPostingTime: string
+  /**
+   * Schedule publish datetime
+   */
+  @Prop({ type: Date })
+  sellScheduleAt: Date;
 
-   // Images : Receive Array of stirng
-   // TODO: Waiting for aws
-   @Prop({type:[String], required:true})
-   images: string[]
+  /**
+   * Property Images
+   */
+  @Prop({
+    type: [ImageItemSchema],
+  })
+  images: ImageItem[];
 
-   @Prop({type:Types.ObjectId,  required: true})
-   propertyOwner: Types.ObjectId
+  /**
+   * Thumbnail Image
+   */
+  @Prop({
+    type: ImageItemSchema,
+    required: true,
+  })
+  thumbnail: ImageItem;
 
-  // @Prop({ type: Types.ObjectId, required: true })
-  // propertyOwner: Types.ObjectId;
+  /**
+   * Property Owner
+   */
+  @Prop({
+    type: Types.ObjectId,
+    ref: 'User',
+    required: true,
+  })
+  propertyOwner: Types.ObjectId;
 }
 
-export type PropertyDocument = HydratedDocument<Property>;
 export const PropertySchema = SchemaFactory.createForClass(Property);
