@@ -9,9 +9,16 @@ import { UserModule } from './user/user.module';
 import { ServiceModule } from './service/service.module';
 import { PaymentModule } from './payment/payment.module';
 import { MaintenanceModule } from './maintenance/maintenance.module';
+import { ArticleModule } from './article/article.module';
+import { MailModule } from './mail/mail.module';
+import { ContactModule } from './contact/contact.module';
+import { MailService } from './mail/mail.service';
+import { AwsService } from './common/aws/aws.service';
+import { AwsModule } from './common/aws/aws.module';
 
 @Module({
   imports: [
+    AwsModule,
     MongooseConnectionsModule,
     AuthModule,
     PropertyModule,
@@ -21,9 +28,12 @@ import { MaintenanceModule } from './maintenance/maintenance.module';
     ServiceModule,
     PaymentModule,
     MaintenanceModule,
+    ArticleModule,
+    MailModule,
+    ContactModule,
   ],
 
   controllers: [],
-  providers: [],
+  providers: [AwsService],
 })
 export class AppModule {}

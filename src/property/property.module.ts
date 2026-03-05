@@ -5,6 +5,7 @@ import { PropertyController } from './property.controller';
 import { Property, PropertySchema } from 'src/schemas/property.schema';
 import { User, UserSchema } from 'src/schemas/user.schema';
 import { SubscribedUserGuard } from 'src/auth/guards/subscribed-user.guard';
+import { AwsService } from 'src/common/aws/aws.service';
 
 @Module({
   imports: [
@@ -14,6 +15,6 @@ import { SubscribedUserGuard } from 'src/auth/guards/subscribed-user.guard';
     ]),
   ],
   controllers: [PropertyController],
-  providers: [PropertyService, SubscribedUserGuard],
+  providers: [PropertyService, SubscribedUserGuard, AwsService],
 })
 export class PropertyModule {}
