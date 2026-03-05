@@ -20,7 +20,7 @@ import { Roles } from 'src/auth/decorators/roles.decorator';
 import { UserRole } from 'src/schemas/user.schema';
 import { CurrentUser } from 'src/auth/decorators/current-user.decorator';
 import type { AuthUser } from 'src/common/interface/auth-user.interface';
-
+import { MongoIdDto } from 'src/common/dto/mongoId.dto';
 @Controller('payment')
 export class PaymentController {
   constructor(private readonly paymentService: PaymentService) {}
@@ -33,9 +33,7 @@ export class PaymentController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.USER)
   @Post()
-  create(
-      @CurrentUser() user: AuthUser,
-  ) {
+  create(@CurrentUser() user: AuthUser) {
     return this.paymentService.create(user);
   }
 
@@ -45,7 +43,7 @@ export class PaymentController {
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.paymentService.findOne(id);
+  findOne(@Param() param: MongoIdDto) {
+    return this.paymentService.findOne(param.id);
   }
 }

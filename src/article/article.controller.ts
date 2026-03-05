@@ -1,51 +1,150 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UploadedFile,
+  UploadedFiles,
+  UseGuards,
+  UseInterceptors,
+} from '@nestjs/common';
 import { Roles } from 'src/auth/decorators/roles.decorator';
 import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
 import { UserRole } from 'src/schemas/user.schema';
 import { ArticleService } from './article.service';
 import { CreateArticleDto } from './dto/create-article.dto';
 import { UpdateArticleDto } from './dto/update-article.dto';
+import { RolesGuard } from 'src/auth/guards/roles.guard';
+import { AwsService } from 'src/common/aws/aws.service';
+import { FileFieldsInterceptor } from '@nestjs/platform-express/multer/interceptors/file-fields.interceptor';
+import { memoryStorage } from 'multer';
+import { CurrentUser } from 'src/auth/decorators/current-user.decorator';
+import type { AuthUser } from 'src/common/interface/auth-user.interface';
+import { MongoIdDto } from 'src/common/dto/mongoId.dto';
 
 @Controller('article')
 export class ArticleController {
-  constructor(private readonly articleService: ArticleService) {}
-
-
-  // Article save controller
-  @UseGuards(JwtAuthGuard)
-  @Roles(UserRole.ADMIN)  //! Roles can't work
+  constructor(
+    private readonly articleService: ArticleService,
+    private readonly awsService: AwsService,
+  ) {}
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @Post()
-  create(@Body() createArticleDto: CreateArticleDto) {
-    return this.articleService.create(createArticleDto);
+  // Image upload handling with validation
+  @UseInterceptors(
+    FileFieldsInterceptor([{ name: 'image', maxCount: 1 }], {
+      storage: memoryStorage(),
+      limits: { fileSize: 5 * 1024 * 1024 },
+      fileFilter: (req, file, cb) => {
+        if (!file.mimetype.startsWith('image/')) {
+          return cb(
+            new BadRequestException('Only image files are allowed'),
+            false,
+          );
+        }
+        cb(null, true);
+      },
+    }),
+  )
+  async create(
+    @Body() createArticleDto: CreateArticleDto & { image: string },
+    @CurrentUser() user: AuthUser,
+    @UploadedFiles() files: { image?: Express.Multer.File[] },
+  ) {
+    const image = files?.image?.[0];
+    if (!image) {
+      throw new BadRequestException('Image is required');
+    }
+
+    // Upload image to AWS S3 and get the URL
+    // Upload image to S3
+    const imageUrl = await this.awsService.uploadFile(
+      image,
+      `articles/${user.userId}`,
+    );
+    const dtoWithFile = {
+      ...createArticleDto,
+      image: {
+        key: this.awsService.extractKeyFromUrl
+          ? (this.awsService.extractKeyFromUrl(imageUrl) ?? imageUrl)
+          : imageUrl,
+        image: imageUrl,
+      },
+    };
+    try {
+      return await this.articleService.create(dtoWithFile, user);
+    } catch (err) {
+      // Rollback: delete uploaded image from S3 if DB save fails
+      const key = dtoWithFile.image.key;
+      if (key) {
+        await this.awsService.deleteFile(key).catch(() => {});
+      }
+      throw err;
+    }
   }
 
-  
-@Get()
-  async findAll( @Query() query: Record<string, any>) {
+  @Get()
+  async findAll(@Query() query: Record<string, any>) {
     return await this.articleService.findAll(query);
   }
 
-
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.articleService.findOne(id);
+  findOne(@Param() param: MongoIdDto) {
+    return this.articleService.findOne(param.id);
   }
 
-
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   @Patch(':id')
-  update(@Param('id') id: string, @Body() updateArticleDto: UpdateArticleDto) {
-    return this.articleService.update(id, updateArticleDto);
+  @UseInterceptors(
+    FileFieldsInterceptor([{ name: 'image', maxCount: 1 }], {
+      storage: memoryStorage(),
+      limits: { fileSize: 5 * 1024 * 1024 },
+      fileFilter: (req, file, cb) => {
+        if (!file.mimetype.startsWith('image/')) {
+          return cb(
+            new BadRequestException('Only image files are allowed'),
+            false,
+          );
+        }
+        cb(null, true);
+      },
+    }),
+  )
+  async update(
+    @Param() param: MongoIdDto,
+    @Body() updateArticleDto: UpdateArticleDto,
+    @CurrentUser() user: AuthUser,
+    @UploadedFiles() files: { image?: Express.Multer.File[] },
+  ) {
+    let updatedDto: any = { ...updateArticleDto };
+    if (files?.image?.[0]) {
+      // If a new image is provided, upload and set it
+      const image = files.image[0];
+      const imageUrl = await this.awsService.uploadFile(
+        image,
+        `articles/${user.userId}`,
+      );
+      updatedDto.image = {
+        key: this.awsService.extractKeyFromUrl
+          ? (this.awsService.extractKeyFromUrl(imageUrl) ?? imageUrl)
+          : imageUrl,
+        image: imageUrl,
+      };
+    }
+    return this.articleService.update(param.id, updatedDto);
   }
 
-
-
-
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.articleService.remove(id);
+  remove(@Param() param: MongoIdDto) {
+    return this.articleService.remove(param.id);
   }
 }

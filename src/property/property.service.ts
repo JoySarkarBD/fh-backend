@@ -1,6 +1,10 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { AwsService } from 'src/common/aws/aws.service';
 import { AuthUser } from 'src/common/interface/auth-user.interface';
 import { Property } from 'src/schemas/property.schema';
@@ -8,6 +12,7 @@ import { UserRole } from 'src/schemas/user.schema';
 import { CreatePropertyDto } from './dto/create-property.dto';
 import { UpdatePropertyDto } from './dto/update-property.dto';
 import { PropertyResponse } from './property.interface';
+import { MongoIdDto } from 'src/common/dto/mongoId.dto';
 
 @Injectable()
 export class PropertyService {
@@ -23,7 +28,7 @@ export class PropertyService {
       thumbnail: { key: string; image: string };
     },
     user: AuthUser,
-  ): Promise<PropertyResponse>{
+  ): Promise<PropertyResponse> {
     const normalizedImages = (createPropertyDto.images || []).map((item) => ({
       key: item.key,
       image: item.image,
@@ -36,7 +41,7 @@ export class PropertyService {
 
     const payload = {
       ...createPropertyDto,
-      propertyOwner: user.userId,
+      propertyOwner: new Types.ObjectId(user.userId),
       images: normalizedImages,
       thumbnail: normalizedThumbnail,
     };
@@ -44,7 +49,6 @@ export class PropertyService {
     const createdPropertyDoc = new this.propertyModel(payload);
     const savedProperty = await createdPropertyDoc.save();
     const propertyObj = savedProperty.toObject();
-
 
     //! public image link generation faaaaaahhhhhhhhhhhhh
     // Generate signed URLs only (strings)
@@ -56,12 +60,16 @@ export class PropertyService {
 
     let thumbnailSignedUrl: string | undefined;
     if (propertyObj.thumbnail?.key) {
-      thumbnailSignedUrl = await this.awsService.generateSignedUrl(propertyObj.thumbnail.key);
+      thumbnailSignedUrl = await this.awsService.generateSignedUrl(
+        propertyObj.thumbnail.key,
+      );
     }
 
     return {
       ...propertyObj,
-      propertyOwner: propertyObj.propertyOwner?.toString?.() ?? String(propertyObj.propertyOwner),
+      propertyOwner:
+        propertyObj.propertyOwner?.toString?.() ??
+        String(propertyObj.propertyOwner),
       images: imagesSignedUrls,
       thumbnail: thumbnailSignedUrl,
     };
@@ -78,9 +86,13 @@ export class PropertyService {
 
     const toNumberArray = (value: any) => {
       if (!value) return [];
-      if (Array.isArray(value)) return value.map(Number).filter((n) => !isNaN(n));
+      if (Array.isArray(value))
+        return value.map(Number).filter((n) => !isNaN(n));
       if (typeof value === 'string')
-        return value.split(',').map((v) => Number(v.trim())).filter((n) => !isNaN(n));
+        return value
+          .split(',')
+          .map((v) => Number(v.trim()))
+          .filter((n) => !isNaN(n));
       return [];
     };
 
@@ -94,7 +106,8 @@ export class PropertyService {
 
     const squareFeetArray = toNumberArray(query?.squareFeet);
     if (squareFeetArray.length === 1) filters.squareFeet = squareFeetArray[0];
-    if (squareFeetArray.length > 1) filters.squareFeet = { $in: squareFeetArray };
+    if (squareFeetArray.length > 1)
+      filters.squareFeet = { $in: squareFeetArray };
 
     const bedroomArray = toNumberArray(query?.bedrooms);
     if (bedroomArray.length === 1) filters.bedrooms = bedroomArray[0];
@@ -105,7 +118,9 @@ export class PropertyService {
     if (bathroomArray.length > 1) filters.bathrooms = { $in: bathroomArray };
 
     if (query?.type) {
-      const types = Array.isArray(query.type) ? query.type : query.type.split(',');
+      const types = Array.isArray(query.type)
+        ? query.type
+        : query.type.split(',');
       filters.propertyType = { $in: types };
     }
 
@@ -136,12 +151,16 @@ export class PropertyService {
     return propertiesWithSignedUrls;
   }
 
-  async findOne(id: string) {
+  async findOne(id: MongoIdDto['id']) {
     const property = await this.propertyModel.findOne({ _id: id });
     return property;
   }
 
-  async update(id: string, updatePropertyDto: UpdatePropertyDto, user: AuthUser) {
+  async update(
+    id: MongoIdDto['id'],
+    updatePropertyDto: UpdatePropertyDto,
+    user: AuthUser,
+  ) {
     const propertyExists = await this.propertyModel.exists({ _id: id });
     if (!propertyExists) throw new NotFoundException('Property not found');
 
@@ -151,11 +170,14 @@ export class PropertyService {
     });
     if (!isOwner) throw new ForbiddenException('Forbidden');
 
-    const updated = await this.propertyModel.updateOne({ _id: id }, { $set: updatePropertyDto });
+    const updated = await this.propertyModel.updateOne(
+      { _id: id },
+      { $set: updatePropertyDto },
+    );
     return updated;
   }
 
-  async remove(id: string, user: AuthUser) {
+  async remove(id: MongoIdDto['id'], user: AuthUser) {
     const isOwner = await this.propertyModel.exists({
       _id: id,
       propertyOwner: user.userId,

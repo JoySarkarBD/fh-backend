@@ -12,6 +12,7 @@ import {
   MaintenanceDocument,
 } from 'src/schemas/maintenance.schema';
 import { PaginatedMetaDto, PaginationDto } from 'src/common/dto/pagination.dto';
+import { MongoIdDto, UserIdDto } from 'src/common/dto/mongoId.dto';
 
 @Injectable()
 export class MaintenanceService {
@@ -20,7 +21,10 @@ export class MaintenanceService {
     private readonly maintenanceModel: Model<MaintenanceDocument>,
   ) {}
 
-  async create(userId: string, createMaintenanceDto: CreateMaintenanceDto) {
+  async create(
+    userId: UserIdDto['userId'],
+    createMaintenanceDto: CreateMaintenanceDto,
+  ) {
     const createdMaintenance = new this.maintenanceModel({
       ...createMaintenanceDto,
       user: new Types.ObjectId(userId),
@@ -33,7 +37,7 @@ export class MaintenanceService {
     };
   }
 
-  async findAll(userId: string, query: PaginationDto) {
+  async findAll(userId: UserIdDto['userId'], query: PaginationDto) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
     const search = query.search?.trim();
@@ -80,9 +84,7 @@ export class MaintenanceService {
     };
   }
 
-  async findOne(id: string, userId: string) {
-    this.ensureValidObjectId(id);
-
+  async findOne(id: MongoIdDto['id'], userId: UserIdDto['userId']) {
     const maintenance = await this.maintenanceModel.findOne({
       _id: id,
       user: new Types.ObjectId(userId),
@@ -99,11 +101,10 @@ export class MaintenanceService {
   }
 
   async update(
-    id: string,
-    userId: string,
+    id: MongoIdDto['id'],
+    userId: UserIdDto['userId'],
     updateMaintenanceDto: UpdateMaintenanceDto,
   ) {
-    this.ensureValidObjectId(id);
 
     const updatedMaintenance = await this.maintenanceModel.findOneAndUpdate(
       { _id: id, user: new Types.ObjectId(userId) },
@@ -121,8 +122,7 @@ export class MaintenanceService {
     };
   }
 
-  async remove(id: string, userId: string) {
-    this.ensureValidObjectId(id);
+  async remove(id: MongoIdDto['id'], userId: UserIdDto['userId']) {
 
     const deletedMaintenance = await this.maintenanceModel.findOneAndDelete({
       _id: id,
@@ -137,11 +137,5 @@ export class MaintenanceService {
       message: 'Maintenance deleted successfully',
       data: deletedMaintenance,
     };
-  }
-
-  private ensureValidObjectId(id: string) {
-    if (!Types.ObjectId.isValid(id)) {
-      throw new BadRequestException('Invalid id');
-    }
   }
 }

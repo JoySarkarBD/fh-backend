@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { NotificationSettings } from 'src/schemas/notification.settngs.schema';
 import { UpdateNotificationSettingDto } from './dto/update-notification-setting.dto';
+import { MongoIdDto } from 'src/common/dto/mongoId.dto';
 
 @Injectable()
 export class NotificationSettingsService {
@@ -27,7 +28,7 @@ export class NotificationSettingsService {
   }
 
   // get single notificaiton detiails if needed
-  async findOne(id: string) {
+  async findOne(id: MongoIdDto['id']) {
     const notificationSetting = await this.notificationSettingModel.findOne({
       _id: id,
     });
@@ -35,7 +36,7 @@ export class NotificationSettingsService {
   }
 
   async update(
-    id: string,
+    id: MongoIdDto['id'],
     updateNotificationSettingDto: UpdateNotificationSettingDto,
   ) {
     const updated = await this.notificationSettingModel.updateOne(

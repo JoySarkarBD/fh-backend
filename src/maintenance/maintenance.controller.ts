@@ -20,7 +20,7 @@ import { PaginationDto } from 'src/common/dto/pagination.dto';
 import { RolesGuard } from 'src/auth/guards/roles.guard';
 import { Roles } from 'src/auth/decorators/roles.decorator';
 import { UserRole } from 'src/schemas/user.schema';
-
+import { MongoIdDto } from 'src/common/dto/mongoId.dto';
 @Controller('maintenance')
 @UseGuards(JwtAuthGuard, RolesGuard, SubscribedUserGuard)
 @Roles(UserRole.USER)
@@ -41,25 +41,25 @@ export class MaintenanceController {
   }
 
   @Get(':id')
-  findOne(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.maintenanceService.findOne(id, user.userId);
+  findOne(@CurrentUser() user: AuthUser, @Param() param: MongoIdDto) {
+    return this.maintenanceService.findOne(param.id, user.userId);
   }
 
   @Patch(':id')
   update(
     @CurrentUser() user: AuthUser,
-    @Param('id') id: string,
+    @Param() param: MongoIdDto,
     @Body() updateMaintenanceDto: UpdateMaintenanceDto,
   ) {
     return this.maintenanceService.update(
-      id,
+      param.id,
       user.userId,
       updateMaintenanceDto,
     );
   }
 
   @Delete(':id')
-  remove(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.maintenanceService.remove(id, user.userId);
+  remove(@CurrentUser() user: AuthUser, @Param() param: MongoIdDto) {
+    return this.maintenanceService.remove(param.id, user.userId);
   }
 }

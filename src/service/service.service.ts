@@ -9,6 +9,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Service, ServiceDocument } from 'src/schemas/service.schema';
 import { Model, Types } from 'mongoose';
 import { PaginatedMetaDto, PaginationDto } from 'src/common/dto/pagination.dto';
+import { MongoIdDto } from 'src/common/dto/mongoId.dto';
 
 @Injectable()
 export class ServiceService {
@@ -92,9 +93,7 @@ export class ServiceService {
     };
   }
 
-  async findOne(id: string) {
-    this.ensureValidObjectId(id);
-
+  async findOne(id: MongoIdDto['id']) {
     const service = await this.serviceModel.findById(id);
     if (!service) {
       throw new NotFoundException('Service not found');
@@ -106,9 +105,7 @@ export class ServiceService {
     };
   }
 
-  async update(id: string, updateServiceDto: UpdateServiceDto) {
-    this.ensureValidObjectId(id);
-
+  async update(id: MongoIdDto['id'], updateServiceDto: UpdateServiceDto) {
     const updatePayload = {
       ...updateServiceDto,
       ...(updateServiceDto.description
@@ -139,9 +136,7 @@ export class ServiceService {
     };
   }
 
-  async remove(id: string) {
-    this.ensureValidObjectId(id);
-
+  async remove(id: MongoIdDto['id']) {
     const deletedService = await this.serviceModel.findByIdAndDelete(id);
     if (!deletedService) {
       throw new NotFoundException('Service not found');
@@ -153,12 +148,6 @@ export class ServiceService {
     };
   }
 
-  private ensureValidObjectId(id: string) {
-    if (!Types.ObjectId.isValid(id)) {
-      throw new BadRequestException('Invalid service id');
-    }
-  }
-
   // Helper method to normalize the description array by ensuring each item has a valid ObjectId and trimming the text
   private normalizeDescription(
     description: { id?: string; text: string }[],
@@ -166,7 +155,7 @@ export class ServiceService {
   ) {
     return description.map((item) => ({
       id:
-        preserveIncomingId && item.id && Types.ObjectId.isValid(item.id)
+        MongoIdDto['id'] && item.id && Types.ObjectId.isValid(item.id)
           ? new Types.ObjectId(item.id)
           : new Types.ObjectId(),
       text: item.text.trim(),

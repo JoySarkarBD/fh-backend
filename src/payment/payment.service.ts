@@ -14,6 +14,7 @@ import Stripe from 'stripe';
 import { User, UserDocument } from '../schemas/user.schema';
 import { config } from 'src/config/app.config';
 import { AuthUser } from 'src/common/interface/auth-user.interface';
+import { MongoIdDto } from 'src/common/dto/mongoId.dto';
 
 @Injectable()
 export class PaymentService {
@@ -207,7 +208,7 @@ export class PaymentService {
     };
   }
 
-  async findOne(id: string) {
+  async findOne(id: MongoIdDto['id']) {
     this.ensureValidObjectId(id);
 
     const payment = await this.paymentModel

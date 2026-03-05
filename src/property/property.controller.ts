@@ -27,6 +27,7 @@ import { UserRole } from 'src/schemas/user.schema';
 import { CreatePropertyDto } from './dto/create-property.dto';
 import { UpdatePropertyDto } from './dto/update-property.dto';
 import { PropertyService } from './property.service';
+import { MongoIdDto } from 'src/common/dto/mongoId.dto';
 
 @Controller('property')
 export class PropertyController {
@@ -49,7 +50,10 @@ export class PropertyController {
         limits: { fileSize: 5 * 1024 * 1024 },
         fileFilter: (req, file, cb) => {
           if (!file.mimetype.startsWith('image/')) {
-            return cb(new BadRequestException('Only image files are allowed'), false);
+            return cb(
+              new BadRequestException('Only image files are allowed'),
+              false,
+            );
           }
           cb(null, true);
         },
@@ -109,27 +113,25 @@ export class PropertyController {
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.propertyService.findOne(id);
+  findOne(@Param() param: MongoIdDto) {
+    return this.propertyService.findOne(param.id);
   }
 
   @UseGuards(JwtAuthGuard, SubscribedUserGuard)
   @Roles(UserRole.USER)
   @Patch(':id')
   update(
-    @Param('id') id: string,
+    @Param() param: MongoIdDto,
     @Body() updatePropertyDto: UpdatePropertyDto,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.propertyService.update(id, updatePropertyDto, user);
+    return this.propertyService.update(param.id, updatePropertyDto, user);
   }
 
   @UseGuards(JwtAuthGuard, SubscribedUserGuard)
   @Roles(UserRole.USER)
   @Delete(':id')
-  remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.propertyService.remove(id, user);
+  remove(@Param() param: MongoIdDto, @CurrentUser() user: AuthUser) {
+    return this.propertyService.remove(param.id, user);
   }
 }
-
-
