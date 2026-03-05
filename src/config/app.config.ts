@@ -15,6 +15,13 @@ interface config {
   MAIL_HOST:string;
   MAIL_PORT:string;
   CONTACT_RECEIVER_EMAIL:string
+  AWS_ACCESS_KEY_ID:string;
+  AWS_SECRET_ACCESS_KEY:string;
+  AWS_REGION:string;
+  AWS_S3_BUCKET_NAME:string;
+  AWS_SES_FROM_EMAIL:string;
+
+
 }
 export const config: config = {
   PORT: parseInt(process.env.PORT as string, 10) || 5000,
@@ -33,4 +40,13 @@ export const config: config = {
   MAIL_HOST: process.env.MAIL_HOST as string,
   MAIL_PORT : process.env.MAIL_PORT as string,
   CONTACT_RECEIVER_EMAIL :  process.env.CONTACT_RECEIVER_EMAIL as string,
+  AWS_S3_BUCKET_NAME:process.env.AWS_S3_BUCKET_NAME as string,
+  AWS_SES_FROM_EMAIL:process.env.AWS_SES_FROM_EMAIL as string,
+    AWS_REGION:process.env.AWS_REGION as string,
+      AWS_SECRET_ACCESS_KEY:process.env.AWS_ACCESS_KEY_ID as string,
+      AWS_ACCESS_KEY_ID:process.env.AWS_ACCESS_KEY_ID as string
+
+
+
+
 };
