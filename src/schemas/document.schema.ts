@@ -1,4 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { Types } from 'mongoose';
 
 @Schema({ _id: false })
 export class DocumentItem {
@@ -13,7 +14,7 @@ export const DocumentItemSchema = SchemaFactory.createForClass(DocumentItem);
 @Schema({ timestamps: true })
 export class Document {
   @Prop({ required: true, ref: 'Property' })
-  property: string;
+  propertyId: Types.ObjectId;
 
   @Prop({
     type: DocumentItemSchema,

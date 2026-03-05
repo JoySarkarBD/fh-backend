@@ -15,6 +15,7 @@ import { ContactModule } from './contact/contact.module';
 import { MailService } from './mail/mail.service';
 import { AwsService } from './common/aws/aws.service';
 import { AwsModule } from './common/aws/aws.module';
+import { DocumentModule } from './document/document.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { AwsModule } from './common/aws/aws.module';
     ArticleModule,
     MailModule,
     ContactModule,
+    DocumentModule,
   ],
 
   controllers: [],
