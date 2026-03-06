@@ -3,7 +3,6 @@ import {
   Get,
   Post,
   Body,
-  Patch,
   Param,
   Delete,
   UseGuards,
@@ -14,7 +13,6 @@ import {
 } from '@nestjs/common';
 import { DocumentService } from './document.service';
 import { CreateDocumentDto } from './dto/create-document.dto';
-import { UpdateDocumentDto } from './dto/update-document.dto';
 import { AwsService } from 'src/common/aws/aws.service';
 import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
 import { RolesGuard } from 'src/auth/guards/roles.guard';
@@ -25,6 +23,8 @@ import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { CurrentUser } from 'src/auth/decorators/current-user.decorator';
 import type { AuthUser } from 'src/common/interface/auth-user.interface';
+import { MongoIdDto } from 'src/common/dto/mongoId.dto';
+import { RemoveDocumentItemDto } from './dto/remove-document-item.dto';
 
 @Controller('document')
 @UseGuards(JwtAuthGuard, RolesGuard, SubscribedUserGuard)
@@ -35,6 +35,14 @@ export class DocumentController {
     private readonly awsService: AwsService,
   ) {}
 
+  /**
+   * Create a new document record.
+   *
+   * @param createDocumentDto - The data transfer object containing document details and URLs.
+   * @param user - The authenticated user creating the document.
+   * @param files - The uploaded document files.
+   * @returns The created document record with signed URLs for the uploaded files.
+   */
   @Post()
   // Image upload handling with validation
   @UseInterceptors(
@@ -96,26 +104,38 @@ export class DocumentController {
     }
   }
 
+  /**
+   * Find all documents with pagination and optional filtering.
+   *
+   * @param query - An object containing pagination parameters (page, limit) and optional filters (e.g., propertyId).
+   * @param user - The authenticated user requesting the documents.
+   * @returns A promise that resolves to an object containing the list of documents and pagination metadata.
+   */
   @Get()
-  async findAll(@Query() query: Record<string, any>, @CurrentUser() user: AuthUser) {
+  async findAll(
+    @Query() query: Record<string, any>,
+    @CurrentUser() user: AuthUser,
+  ) {
     return await this.documentService.findAll(query, user);
   }
 
+  /**
+   * Find a document by ID.
+   *
+   * @param param - An object containing the document ID as a parameter.
+   * @param user - The authenticated user requesting the document.
+   * @returns A promise that resolves to the document record if found, or throws a NotFoundException if not found.
+   */
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.documentService.findOne(+id);
+  async findOne(@Param() param: MongoIdDto, @CurrentUser() user: AuthUser) {
+    return await this.documentService.findOne(param.id, user);
   }
 
-  @Patch(':id')
-  update(
-    @Param('id') id: string,
-    @Body() updateDocumentDto: UpdateDocumentDto,
+  @Delete(':id/docs/:docId')
+  async removeDoc(
+    @Param() param: RemoveDocumentItemDto,
+    @CurrentUser() user: AuthUser,
   ) {
-    return this.documentService.update(+id, updateDocumentDto);
-  }
-
-  @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.documentService.remove(+id);
+    return await this.documentService.removeDoc(param.id, param.docId, user);
   }
 }

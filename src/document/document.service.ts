@@ -1,11 +1,11 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { CreateDocumentDto } from './dto/create-document.dto';
-import { UpdateDocumentDto } from './dto/update-document.dto';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { AwsService } from 'src/common/aws/aws.service';
 import { AuthUser } from 'src/common/interface/auth-user.interface';
 import { Document } from 'src/schemas/document.schema';
+import { MongoIdDto } from 'src/common/dto/mongoId.dto';
 
 @Injectable()
 export class DocumentService {
@@ -13,6 +13,36 @@ export class DocumentService {
     @InjectModel(Document.name) private readonly DocumentModel: Model<Document>,
     private readonly awsService: AwsService,
   ) {}
+
+  private async mapDocumentResponse(document: any) {
+    return {
+      ...document.toObject(),
+      propertyName: document.propertyId?.propertyName,
+      propertyId:
+        typeof document.propertyId === 'object' && document.propertyId?._id
+          ? document.propertyId._id
+          : document.propertyId,
+      docs: await Promise.all(
+        (document.docs || []).map(async (doc: any) => ({
+          _id: doc._id,
+          documentUrl: await this.awsService.generateSignedUrl(doc.key),
+        })),
+      ),
+    };
+  }
+
+  async findOneOwnedRaw(id: MongoIdDto['id'], user: AuthUser) {
+    const document = await this.DocumentModel.findOne({
+      _id: id,
+      createdBy: new Types.ObjectId(user.userId),
+    }).exec();
+
+    if (!document) {
+      throw new NotFoundException(`Document with ID ${id} not found`);
+    }
+
+    return document;
+  }
 
   /**
    * Create a new document record in the database.
@@ -26,8 +56,36 @@ export class DocumentService {
     },
     user: AuthUser,
   ) {
+    // Check if the propertyId exists in documents
+    const existing = await this.DocumentModel.findOne({
+      propertyId: new Types.ObjectId(createDocumentDto.propertyId),
+      createdBy: new Types.ObjectId(user.userId),
+    }).exec();
+
+    if (existing) {
+      // now add documents to the existing document record
+      const updatedDocs = [
+        ...(existing.docs || []),
+        ...(createDocumentDto.docs || []),
+      ];
+      existing.docs = updatedDocs;
+
+      const result = await existing.save();
+
+      return {
+        ...result.toObject(),
+        docs: await Promise.all(
+          result.docs.map(async (doc: any) => ({
+            _id: doc._id,
+            documentUrl: await this.awsService.generateSignedUrl(doc.key),
+          })),
+        ),
+      };
+    }
+
     const createDocument = new this.DocumentModel({
       ...createDocumentDto,
+      propertyId: new Types.ObjectId(createDocumentDto.propertyId),
       createdBy: new Types.ObjectId(user.userId),
     });
     const result = await createDocument.save();
@@ -66,6 +124,7 @@ export class DocumentService {
     if (propertyId) filter.propertyId = propertyId;
 
     const docs = await this.DocumentModel.find(filter)
+      .populate('propertyId', 'propertyName')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(Number(limitNumber))
@@ -74,7 +133,7 @@ export class DocumentService {
     const total = await this.DocumentModel.countDocuments(filter);
 
     return {
-      data: docs,
+      data: await Promise.all(docs.map((doc) => this.mapDocumentResponse(doc))),
       pagination: {
         total,
         page: Number(pageNumber),
@@ -86,15 +145,60 @@ export class DocumentService {
     };
   }
 
-  findOne(id: number) {
-    return `This action returns a #${id} document`;
+  /**
+   *
+   * Find a single document by its ID.
+   *
+   * @param id - The ID of the document to retrieve.
+   * @returns A promise that resolves to the document record if found, or null if not found.
+   * @throws {BadRequestException} If the provided ID is invalid.
+   */
+  async findOne(id: MongoIdDto['id'], user: AuthUser) {
+    const document = await this.DocumentModel.findOne({
+      _id: id,
+      createdBy: new Types.ObjectId(user.userId),
+    }).exec();
+    if (!document) {
+      throw new NotFoundException(`Document with ID ${id} not found`);
+    }
+    return this.mapDocumentResponse(document);
   }
 
-  update(id: number, updateDocumentDto: UpdateDocumentDto) {
-    return `This action updates a #${id} document`;
-  }
+  async removeDoc(
+    id: MongoIdDto['id'],
+    docId: MongoIdDto['id'],
+    user: AuthUser,
+  ) {
+    const existing = await this.DocumentModel.findOne({
+      _id: id,
+      createdBy: new Types.ObjectId(user.userId),
+    }).exec();
 
-  remove(id: number) {
-    return `This action removes a #${id} document`;
+    if (!existing) {
+      throw new NotFoundException(
+        `Document with ID ${id} not found or not owned by user`,
+      );
+    }
+
+    const targetDoc = (existing.docs || []).find(
+      (doc: any) => String(doc._id) === String(docId),
+    );
+
+    if (!targetDoc) {
+      throw new NotFoundException(
+        `Document item with ID ${docId} not found for document ${id}`,
+      );
+    }
+
+    if (targetDoc.key) {
+      await this.awsService.deleteFile(targetDoc.key);
+    }
+
+    await this.DocumentModel.updateOne(
+      { _id: id, createdBy: new Types.ObjectId(user.userId) },
+      { $pull: { docs: { _id: new Types.ObjectId(docId) } } },
+    ).exec();
+
+    return { message: 'Document file deleted successfully' };
   }
 }
