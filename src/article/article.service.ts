@@ -43,7 +43,7 @@ export class ArticleService {
   }
 
   /**
-   * Create a New Article
+   * Find all articles with pagination
    *
    * This method accepts article details and saves a new article to the database.
    *

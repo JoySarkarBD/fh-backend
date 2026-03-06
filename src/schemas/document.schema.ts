@@ -1,7 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 
-@Schema({ _id: false })
+@Schema()
 export class DocumentItem {
   @Prop({ required: true })
   key: string; // s3 object key
@@ -9,6 +9,7 @@ export class DocumentItem {
   @Prop({ required: true })
   documentUrl: string;
 }
+
 export const DocumentItemSchema = SchemaFactory.createForClass(DocumentItem);
 
 @Schema({ timestamps: true })
@@ -17,9 +18,12 @@ export class Document {
   propertyId!: Types.ObjectId;
 
   @Prop({
-    type: DocumentItemSchema,
+    type: [DocumentItemSchema],
     required: true,
   })
-  image!: DocumentItem;
+  docs!: DocumentItem[];
+
+  @Prop({ ref: 'User' })
+  createdBy?: Types.ObjectId;
 }
 export const DocumentSchema = SchemaFactory.createForClass(Document);

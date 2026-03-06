@@ -12,7 +12,7 @@ export enum PropertyStatus {
 /**
  * Image Sub Schema
  */
-@Schema({ _id: false })
+@Schema()
 export class ImageItem {
   @Prop({ required: true })
   key!: string; // s3 object key
