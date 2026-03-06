@@ -14,12 +14,12 @@ export const DocumentItemSchema = SchemaFactory.createForClass(DocumentItem);
 @Schema({ timestamps: true })
 export class Document {
   @Prop({ required: true, ref: 'Property' })
-  propertyId: Types.ObjectId;
+  propertyId!: Types.ObjectId;
 
   @Prop({
     type: DocumentItemSchema,
     required: true,
   })
-  image: DocumentItem;
+  image!: DocumentItem;
 }
 export const DocumentSchema = SchemaFactory.createForClass(Document);

@@ -12,22 +12,22 @@ export enum MaintenanceStatus {
 @Schema({ timestamps: true, versionKey: false })
 export class Maintenance {
   @Prop({ type: Types.ObjectId, ref: 'User', required: true })
-  user: Types.ObjectId;
+  user!: Types.ObjectId;
 
   @Prop({ required: true, trim: true })
-  amenities: string;
+  amenities!: string;
 
   @Prop({ required: true, trim: true })
-  task: string;
+  task!: string;
 
   @Prop({ required: true, trim: true })
-  reminderDate: Date;
+  reminderDate!: Date;
 
   @Prop({ required: true, trim: true })
-  description: string;
+  description!: string;
 
   @Prop({ enum: MaintenanceStatus, default: MaintenanceStatus.PENDING })
-  status: MaintenanceStatus;
+  status!: MaintenanceStatus;
 }
 
 export const MaintenanceSchema = SchemaFactory.createForClass(Maintenance);

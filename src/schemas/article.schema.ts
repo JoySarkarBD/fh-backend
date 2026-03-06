@@ -26,22 +26,22 @@ export class Article {
     type: ImageItemSchema,
     required: true,
   })
-  image: ImageItem;
+  image!: ImageItem;
 
   @Prop({ required: true })
-  title: string;
+  title!: string;
 
   @Prop({ required: false })
-  publishDate: string;
+  publishDate?: string;
 
   @Prop({ required: true })
-  blogDetails: string;
+  blogDetails!: string;
 
   @Prop({ required: true })
-  category: ArticleCategory;
+  category!: ArticleCategory;
 
   @Prop({ required: true, ref: 'User' })
-  createdBy: Types.ObjectId;
+  createdBy!: Types.ObjectId;
 }
 
 export const ArticleSchema = SchemaFactory.createForClass(Article);
