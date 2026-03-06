@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { CreateNotificationDto } from './dto/create-notification.dto';
 import { UpdateNotificationDto } from './dto/update-notification.dto';
-
+import { MongoIdDto } from 'src/common/dto/mongoId.dto';
 @Injectable()
 export class NotificationService {
   create(createNotificationDto: CreateNotificationDto) {
@@ -12,15 +12,15 @@ export class NotificationService {
     return `This action returns all notification`;
   }
 
-  findOne(id: number) {
+  findOne(id: MongoIdDto['id']) {
     return `This action returns a #${id} notification`;
   }
 
-  update(id: number, updateNotificationDto: UpdateNotificationDto) {
+  update(id: MongoIdDto['id'], updateNotificationDto: UpdateNotificationDto) {
     return `This action updates a #${id} notification`;
   }
 
-  remove(id: number) {
+  remove(id: MongoIdDto['id']) {
     return `This action removes a #${id} notification`;
   }
 }

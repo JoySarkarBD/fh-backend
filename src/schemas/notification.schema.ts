@@ -1,5 +1,4 @@
 import { Prop, Schema } from '@nestjs/mongoose';
-import { UserIdDto } from 'src/common/dto/mongoId.dto';
 
 export enum NotificationType {
   ALERT = 'ALERT', //*When a property matching their saved search criteria is listed.
@@ -15,17 +14,17 @@ export enum NotificationType {
 @Schema({ timestamps: true })
 export class Notification {
   @Prop({ required: true, ref: 'User' })
-  receiver: string;
+  receiver!: string;
 
   @Prop({ required: false, ref: 'User' })
-  sender: string;
+  sender?: string;
 
   @Prop({ required: true })
-  message: string;
+  message!: string;
 
   @Prop({ enum: NotificationType })
-  type: NotificationType;
+  type?: NotificationType;
 
   @Prop({ required: false })
-  redirectLink: string;
+  redirectLink?: string;
 }

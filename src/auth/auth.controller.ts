@@ -16,6 +16,7 @@ import { CurrentUser } from './decorators/current-user.decorator';
 import { GoogleAuthGuard } from './guards/google-auth.guard';
 import { UserIdDto } from 'src/common/dto/mongoId.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import type { AuthUser } from 'src/common/interface/auth-user.interface';
 
 @Controller('auth')
 export class AuthController {
@@ -50,7 +51,7 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @Patch('change-password')
   changePassword(
-    @CurrentUser() user: UserIdDto,
+    @CurrentUser() user: AuthUser,
     @Body() changePasswordDto: ChangePasswordDto,
   ) {
     return this.authService.changePassword(user.userId, changePasswordDto);

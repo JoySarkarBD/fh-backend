@@ -1,5 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import mongoose, { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, Types } from 'mongoose';
+
+export type PropertyDocument = HydratedDocument<Property>;
 
 export enum PropertyStatus {
   PENDING = 'pending',
@@ -7,54 +9,143 @@ export enum PropertyStatus {
   BAN = 'ban',
 }
 
+/**
+ * Image Sub Schema
+ */
+@Schema({ _id: false })
+export class ImageItem {
+  @Prop({ required: true })
+  key!: string; // s3 object key
+
+  @Prop({ required: true })
+  image!: string;
+}
+
+export const ImageItemSchema = SchemaFactory.createForClass(ImageItem);
+
+/**
+ * Property Schema
+ */
 @Schema({ timestamps: true })
 export class Property {
+  /**
+   * Property Name
+   */
   @Prop({ required: true, trim: true })
-  propertyName: string;
+  propertyName!: string;
 
+  /**
+   * Property Status
+   */
   @Prop({
     required: true,
     enum: PropertyStatus,
-    default: PropertyStatus.PENDING,
+    default: PropertyStatus.ACTIVE,
   })
-  status: PropertyStatus;
+  status!: PropertyStatus;
 
-  @Prop({ required: true, type: String })
-  overview: string;
+  /**
+   * Overview (QuillJS HTML)
+   */
+  @Prop({ required: true })
+  overview!: string;
 
-  @Prop({ required: true, type: String })
-  keyFeatures: string;
+  /**
+   * Key Features (QuillJS HTML)
+   */
+  @Prop({ required: true })
+  keyFeatures!: string;
 
-  @Prop({ required: true, type: Number, min: 0 })
-  bedrooms: number;
+  /**
+   * Bedrooms
+   */
+  @Prop({ required: true, min: 0 })
+  bedrooms!: number;
 
-  @Prop({ required: true, type: Number, min: 0 })
-  bathrooms: number;
+  /**
+   * Bathrooms
+   */
+  @Prop({ required: true, min: 0 })
+  bathrooms!: number;
 
-  @Prop({ required: true, type: Number, min: 0 })
-  squareFeet: number;
+  /**
+   * Square Feet
+   */
+  @Prop({ required: true, min: 0 })
+  squareFeet!: number;
 
-  @Prop({ required: true, type: Number, min: 0 })
-  lotSize: number;
+  /**
+   * Lot Size
+   */
+  @Prop({ min: 0 })
+  lotSize!: number;
 
-  @Prop({ required: true, type: Number, min: 0 })
-  price: number;
+  /**
+   * Price
+   */
+  @Prop({ required: true, min: 0 })
+  price!: number;
 
-  @Prop({ required: true, type: Number })
-  yearBuilt: number;
+  /**
+   * Year Built
+   */
+  @Prop({
+    required: true,
+    min: 1800,
+    max: new Date().getFullYear(),
+  })
+  yearBuilt!: number;
 
-  @Prop({ required: true, type: String })
-  moreDetails: string;
+  /**
+   * More Details (QuillJS HTML)
+   */
+  @Prop({ required: true })
+  moreDetails!: string;
 
-  @Prop({ type: [String], default: [] })
-  photos: string[];
+  /**
+   * Location Map Link
+   */
+  @Prop({ default: '' })
+  locationMapLink!: string;
 
-  @Prop({ type: String, default: '' })
-  locationMapLink: string;
+  /**
+   * Publish Status
+   */
+  @Prop({ default: false })
+  isPublished!: boolean;
 
-  // @Prop({ type: Types.ObjectId, required: true })
-  // propertyOwner: Types.ObjectId;
+  /**
+   * Schedule publish datetime
+   */
+  @Prop({ type: Date })
+  sellScheduleAt!: Date;
+
+  /**
+   * Property Images
+   */
+  @Prop({
+    type: [ImageItemSchema],
+  })
+  images!: ImageItem[];
+
+  /**
+   * Thumbnail Image
+   */
+  @Prop({
+    type: ImageItemSchema,
+    required: true,
+  })
+  thumbnail!: ImageItem;
+
+  /**
+   * Property Owner
+   */
+  @Prop({
+    type: Types.ObjectId,
+    ref: 'User',
+    required: true,
+  })
+  propertyOwner!: Types.ObjectId;
 }
 
-export type PropertyDocument = HydratedDocument<Property>;
 export const PropertySchema = SchemaFactory.createForClass(Property);

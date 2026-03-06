@@ -7,7 +7,7 @@
  * filter before listening on the configured port.
  */
 
-import { ValidationPipe } from '@nestjs/common';
+import { RequestMethod, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import 'dotenv/config';
 import helmet from 'helmet';
@@ -29,16 +29,18 @@ import { config } from './config/app.config';
  * 7. Listens on the port defined by `config.PORT` (fallback: 3000).
  */
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { rawBody: true });
 
   app.enableCors({
     origin: '*', // Allow all origins (adjust for production)
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
-    allowedHeaders: 'Content-Type, Accept, Authorization, x-device-id',
+    allowedHeaders: 'Content-Type, Accept, Authorization',
   });
 
-  // Set global route prefix to "api"
-  app.setGlobalPrefix('api');
+  // Set global route prefix to "api", but exclude webhook from prefix
+  app.setGlobalPrefix('api', {
+    exclude: [{ path: 'webhook', method: RequestMethod.POST }],
+  });
 
   // Apply security headers
   app.use(helmet());

@@ -17,6 +17,7 @@ import { UserRole } from 'src/schemas/user.schema';
 import { Roles } from 'src/auth/decorators/roles.decorator';
 import { MongoIdDto, UserIdDto } from 'src/common/dto/mongoId.dto';
 import { PaginationDto } from 'src/common/dto/pagination.dto';
+import type { AuthUser } from 'src/common/interface/auth-user.interface';
 
 @Controller('users')
 export class UserController {
@@ -31,7 +32,7 @@ export class UserController {
    */
   @UseGuards(JwtAuthGuard)
   @Get('me')
-  getMyProfile(@CurrentUser() user: UserIdDto) {
+  getMyProfile(@CurrentUser() user: AuthUser) {
     return this.userService.getUserProfile(user.userId);
   }
 
@@ -45,7 +46,7 @@ export class UserController {
   @UseGuards(JwtAuthGuard)
   @Patch('me')
   updateMyProfile(
-    @CurrentUser() user: UserIdDto,
+    @CurrentUser() user: AuthUser,
     @Body() updateUserDto: UpdateUserDto,
   ) {
     return this.userService.updateMyProfile(user.userId, updateUserDto);

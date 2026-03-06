@@ -18,6 +18,14 @@ export class UpdateUserDto {
   officeAddress?: string;
 
   @IsOptional()
+  @IsString({ message: 'Home phone must be a string' })
+  homePhone?: string;
+
+  @IsOptional()
+  @IsString({ message: 'Office phone must be a string' })
+  officePhone?: string;
+
+  @IsOptional()
   @IsString({ message: 'Profile image must be a string' })
   profileImage?: string;
 

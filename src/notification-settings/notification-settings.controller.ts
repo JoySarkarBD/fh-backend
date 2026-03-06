@@ -2,7 +2,7 @@ import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
 import { CreateNotificationSettingDto } from './dto/create-notification-setting.dto';
 import { UpdateNotificationSettingDto } from './dto/update-notification-setting.dto';
 import { NotificationSettingsService } from './notification-settings.service';
-
+import { MongoIdDto } from 'src/common/dto/mongoId.dto';
 @Controller('notification-settings')
 export class NotificationSettingsController {
   constructor(
@@ -15,17 +15,17 @@ export class NotificationSettingsController {
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.notificationSettingsService.findOne(id);
+  findOne(@Param() param: MongoIdDto) {
+    return this.notificationSettingsService.findOne(param.id);
   }
 
   @Patch(':id')
   update(
-    @Param('id') id: string,
+    @Param() param: MongoIdDto,
     @Body() updateNotificationSettingDto: UpdateNotificationSettingDto,
   ) {
     return this.notificationSettingsService.update(
-      id,
+      param.id,
       updateNotificationSettingDto,
     );
   }

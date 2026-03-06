@@ -14,15 +14,16 @@ export enum NotificationSettingsTitle {
 @Schema({ timestamps: true })
 export class NotificationSettings {
   @Prop({ required: true, unique: true })
-  name: NotificationType;
+  name!: NotificationType;
+
   @Prop({ required: true, unique: true })
-  title: string;
+  title!: string;
+
   @Prop({ required: true })
-  isActive: boolean;
+  isActive!: boolean;
+
   @Prop({ required: true })
-  description: string;
+  description!: string;
 }
 export const NotificationSettingSchema =
   SchemaFactory.createForClass(NotificationSettings);
-
-//teasting commit 
