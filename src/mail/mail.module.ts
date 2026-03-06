@@ -26,7 +26,8 @@ import { MailConsumer } from './mail.consumer';
       },
     ]),
   ],
-  providers: [MailService, MailConsumer],
+  controllers: [MailConsumer],
+  providers: [MailService],
   exports: [MailService],
 })
 export class MailModule {}
