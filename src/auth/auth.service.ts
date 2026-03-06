@@ -126,6 +126,7 @@ export class AuthService {
       sub: String(user._id),
       email: user.email,
       role: user.role,
+      // isSubscribed: user.isSubscribed,
     };
 
     // sign the payload to create JWT token
