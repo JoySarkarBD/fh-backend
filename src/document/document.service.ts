@@ -47,8 +47,43 @@ export class DocumentService {
     };
   }
 
-  findAll() {
-    return `This action returns all document`;
+  /**
+   * Find all documents with pagination and optional filtering.
+   *
+   * @param query - An object containing pagination parameters (page, limit) and optional filters (e.g., propertyId).
+   * @returns A promise that resolves to an object containing the list of documents and pagination metadata.
+   * @throws {BadRequestException} If pagination parameters are invalid.
+   */
+  async findAll(query: Record<string, any>, user: AuthUser) {
+    const { limit, page, propertyId } = query;
+    const pageNumber = parseInt(page, 10) || 1;
+    const limitNumber = parseInt(limit, 10) || 10;
+    const skip = (pageNumber - 1) * limitNumber;
+
+    const filter: { createdBy: Types.ObjectId; propertyId?: string } = {
+      createdBy: new Types.ObjectId(user.userId),
+    };
+    if (propertyId) filter.propertyId = propertyId;
+
+    const docs = await this.DocumentModel.find(filter)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(Number(limitNumber))
+      .exec();
+
+    const total = await this.DocumentModel.countDocuments(filter);
+
+    return {
+      data: docs,
+      pagination: {
+        total,
+        page: Number(pageNumber),
+        limit: Number(limitNumber),
+        totalPages: Math.ceil(total / Number(limitNumber)),
+        hasNextPage: Number(pageNumber) * Number(limitNumber) < total,
+        hasPrevPage: Number(pageNumber) > 1,
+      },
+    };
   }
 
   findOne(id: number) {

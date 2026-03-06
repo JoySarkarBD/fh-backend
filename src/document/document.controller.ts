@@ -10,6 +10,7 @@ import {
   UseInterceptors,
   BadRequestException,
   UploadedFiles,
+  Query,
 } from '@nestjs/common';
 import { DocumentService } from './document.service';
 import { CreateDocumentDto } from './dto/create-document.dto';
@@ -96,8 +97,8 @@ export class DocumentController {
   }
 
   @Get()
-  findAll() {
-    return this.documentService.findAll();
+  async findAll(@Query() query: Record<string, any>, @CurrentUser() user: AuthUser) {
+    return await this.documentService.findAll(query, user);
   }
 
   @Get(':id')
