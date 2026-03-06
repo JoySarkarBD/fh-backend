@@ -17,23 +17,23 @@ export class DescriptionItemDto {
 
   @IsString({ message: 'Description text must be a string' })
   @IsNotEmpty({ message: 'Description text is required' })
-  text: string;
+  text!: string;
 }
 
 // DTO for creating a new service, which includes validation rules for the service properties
 export class CreateServiceDto {
   @IsString({ message: 'Name must be a string' })
   @IsNotEmpty({ message: 'Name is required & must be a string' })
-  title: string;
+  title!: string;
 
   @IsString({ message: 'Sub title must be a string' })
   @IsNotEmpty({ message: 'Sub title is required & must be a string' })
-  subTitle: string;
+  subTitle!: string;
 
   @IsArray({ message: 'Description must be an array' })
   @IsNotEmpty({ message: 'Description is required' })
   @ArrayMaxSize(4, { message: 'Maximum 4 description items are allowed' })
   @ValidateNested({ each: true })
   @Type(() => DescriptionItemDto)
-  description: DescriptionItemDto[];
+  description!: DescriptionItemDto[];
 }

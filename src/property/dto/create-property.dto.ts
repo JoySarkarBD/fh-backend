@@ -6,77 +6,76 @@ import {
   IsOptional,
   IsString,
   IsUrl,
-  Min
+  Min,
 } from 'class-validator';
 import { PropertyStatus } from 'src/schemas/property.schema';
 
 export class CreatePropertyDto {
-
   @IsString({ message: 'Property name is required' })
-  propertyName: string;
+  propertyName!: string;
 
   @IsEnum(PropertyStatus, {
     message: `Status - (allowed values: ${Object.values(PropertyStatus).join(', ')})`,
   })
-  status: PropertyStatus;
+  status!: PropertyStatus;
 
   @IsString({ message: 'Overview is required' })
-  overview: string;
+  overview!: string;
 
   @IsString({ message: 'Key features are required' })
-  keyFeatures: string;
+  keyFeatures!: string;
 
   @Type(() => Number)
   @IsNumber({}, { message: 'Bedrooms must be a number' })
   @Min(0)
-  bedrooms: number;
+  bedrooms!: number;
 
   @Type(() => Number)
   @IsNumber({}, { message: 'Bathrooms must be a number' })
   @Min(0)
-  bathrooms: number;
+  bathrooms!: number;
 
   @Type(() => Number)
   @IsNumber({}, { message: 'Square feet must be a number' })
   @Min(0)
-  squareFeet: number;
+  squareFeet!: number;
 
   @Type(() => Number)
   @IsNumber({}, { message: 'Lot size must be a number' })
   @Min(0)
-  lotSize: number;
+  lotSize!: number;
 
   @Type(() => Number)
   @IsNumber({}, { message: 'Price must be a number' })
   @Min(0)
-  price: number;
+  price!: number;
 
   @Type(() => Number)
   @IsNumber({}, { message: 'Year built must be a number' })
-  yearBuilt: number;
+  yearBuilt!: number;
 
   @IsString({ message: 'More details are required' })
-  moreDetails: string;
+  moreDetails!: string;
 
   @IsOptional()
   @IsUrl({}, { message: 'Location map link must be a valid URL' })
-  locationMapLink: string;
+  locationMapLink?: string;
 
   @IsOptional()
-  @IsBoolean({ message: "IsPosted must be boolean" })
-  IsPosted: boolean;
+  @IsBoolean({ message: 'IsPosted must be boolean' })
+  IsPosted?: boolean;
 
   @IsOptional()
   @IsString({ message: 'Posting date must be string' })
-  sellPostingDate: string;
+  sellPostingDate?: string;
 
   @IsOptional()
   @IsString({ message: 'Posting Time must be string' })
-  sellPostingTime: string;
+  sellPostingTime?: string;
 
   @IsOptional()
-  thumbnail: any;
+  thumbnail?: any;
 
   @IsOptional()
-  images: any;
+  images?: any;
 }

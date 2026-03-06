@@ -1,9 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { NotificationSettings } from 'src/schemas/notification.settngs.schema';
-import { UpdateNotificationSettingDto } from './dto/update-notification-setting.dto';
 import { MongoIdDto } from 'src/common/dto/mongoId.dto';
+import { NotificationSettings } from 'src/schemas/notification.settings.schema';
+import { UpdateNotificationSettingDto } from './dto/update-notification-setting.dto';
 
 @Injectable()
 export class NotificationSettingsService {

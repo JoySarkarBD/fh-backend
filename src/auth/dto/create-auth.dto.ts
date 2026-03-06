@@ -31,15 +31,15 @@ export class CreateAuthDto {
 
   @IsString({ message: 'Name must be a string' })
   @IsNotEmpty({ message: 'Name is required & must be a string' })
-  name: string;
+  name!: string;
 
   @IsEmail({}, { message: 'Email must be a valid email address' })
   @IsNotEmpty({ message: 'Email is required & must be a valid email address' })
-  email: string;
+  email!: string;
 
   @IsString({ message: 'Phone must be a string' })
   @IsNotEmpty({ message: 'Phone is required & must be a string' })
-  phone: string;
+  phone!: string;
 
   @IsOptional()
   @IsString({ message: 'Home address must be a string' })
@@ -52,13 +52,13 @@ export class CreateAuthDto {
   @MinLength(6, { message: 'Password must be at least 6 characters long' })
   @IsString({ message: 'Password must be a string' })
   @IsNotEmpty({ message: 'Password is required & must be a string' })
-  password: string;
+  password!: string;
 
   @IsString({ message: 'Confirm password must be a string' })
   @IsNotEmpty({ message: 'Confirm password is required & must be a string' })
   @ValidateIf((dto: CreateAuthDto) => Boolean(dto.confirmPassword))
   @Validate(MatchPasswordConstraint)
-  confirmPassword: string;
+  confirmPassword!: string;
 
   @IsOptional()
   @IsBoolean({ message: 'Is subscribed must be a boolean' })
