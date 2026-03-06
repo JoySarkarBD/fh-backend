@@ -38,4 +38,22 @@ export class MailService {
       throw error;
     }
   }
+
+  async sendBulkMail(options: {
+    to: string[];
+    subject: string;
+    html: string;
+    text?: string;
+  }) {
+    const { to, ...rest } = options;
+    const results = await Promise.allSettled(
+      to.map((email) => this.sendMail({ to: email, ...rest })),
+    );
+
+    const successful = results.filter((r) => r.status === 'fulfilled').length;
+    const failed = results.filter((r) => r.status === 'rejected').length;
+
+    this.logger.log(`Bulk mail summary: ${successful} sent, ${failed} failed`);
+    return { successful, failed };
+  }
 }
