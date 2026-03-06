@@ -35,8 +35,7 @@ export class ArticleService {
     });
     const result = await newArticle.save();
     let image = await this.awsService.generateSignedUrl(result.image.key);
-    
- 
+
     return {
       ...result.toObject(),
       image,
@@ -44,7 +43,7 @@ export class ArticleService {
   }
 
   /**
-   * Create a New Article
+   * Find all articles with pagination
    *
    * This method accepts article details and saves a new article to the database.
    *
@@ -134,20 +133,22 @@ export class ArticleService {
       { new: true },
     ).exec();
 
-    if(!updatedArticle) {
-      throw new NotFoundException(`Article with ID ${id} not found after update`);
+    if (!updatedArticle) {
+      throw new NotFoundException(
+        `Article with ID ${id} not found after update`,
+      );
     }
-    
+
     // Delete old image from S3 if new image was provided
     if (oldImageKey) {
       await this.awsService.deleteFile(oldImageKey).catch(() => {});
     }
 
-    const result ={
+    const result = {
       ...updatedArticle.toObject(),
       image: await this.awsService.generateSignedUrl(updatedArticle.image.key),
-    }
-    
+    };
+
     return result;
   }
   /**
