@@ -31,10 +31,30 @@ import { config } from './config/app.config';
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, { rawBody: true });
 
+  const allowedOrigins = [
+    ...(config.FRONTEND_BASE_URL
+      ? config.FRONTEND_BASE_URL.split(',').map((origin) => origin.trim())
+      : []),
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+  ].filter(Boolean);
+
   app.enableCors({
-    origin: '*', // Allow all origins (adjust for production)
+    origin: (origin, callback) => {
+      // Allow server-to-server and same-origin requests without Origin header
+      if (!origin) {
+        return callback(null, true);
+      }
+
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      return callback(new Error('Not allowed by CORS'));
+    },
+    credentials: true,
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
-    allowedHeaders: 'Content-Type, Accept, Authorization',
+    allowedHeaders: 'Content-Type, Accept, Authorization, X-Requested-With',
   });
 
   // Set global route prefix to "api", but exclude webhook from prefix
