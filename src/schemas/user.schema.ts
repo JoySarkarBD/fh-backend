@@ -65,6 +65,24 @@ export class User {
 
   @Prop({ trim: true, default: false })
   isSubscribed?: boolean;
+
+  /**
+   * Properties owned by the user
+   */
+  @Prop({ type: [{ type: 'ObjectId', ref: 'Property' }], default: [] })
+  propertyOwn?: Array<any>;
+
+  /**
+   * Properties bought by the user
+   */
+  @Prop({ type: [{ type: 'ObjectId', ref: 'Property' }], default: [] })
+  propertyBuy?: Array<any>;
+
+  /**
+   * Properties sold by the user
+   */
+  @Prop({ type: [{ type: 'ObjectId', ref: 'Property' }], default: [] })
+  propertySell?: Array<any>;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

@@ -9,6 +9,7 @@ import { AwsService } from 'src/common/aws/aws.service';
 import { AuthUser } from 'src/common/interface/auth-user.interface';
 import { Property } from 'src/schemas/property.schema';
 import { UserRole } from 'src/schemas/user.schema';
+import { User, UserDocument } from 'src/schemas/user.schema';
 import { CreatePropertyDto } from './dto/create-property.dto';
 import { UpdatePropertyDto } from './dto/update-property.dto';
 import { PropertyResponse } from './property.interface';
@@ -19,6 +20,8 @@ export class PropertyService {
   constructor(
     @InjectModel(Property.name)
     private readonly propertyModel: Model<Property>,
+    @InjectModel(User.name)
+    private readonly userModel: Model<UserDocument>,
     private readonly awsService: AwsService,
   ) {}
 
@@ -50,7 +53,30 @@ export class PropertyService {
     const savedProperty = await createdPropertyDoc.save();
     const propertyObj = savedProperty.toObject();
 
-    //! public image link generation faaaaaahhhhhhhhhhhhh
+    // Ensure user document has propertyOwn, propertyBuy, propertySell fields
+
+    const userDoc = await this.userModel.findById(user.userId);
+    const updateFields: any = {};
+    if (userDoc) {
+      if (!userDoc.propertyOwn) updateFields.propertyOwn = [];
+      if (!userDoc.propertyBuy) updateFields.propertyBuy = [];
+      if (!userDoc.propertySell) updateFields.propertySell = [];
+      // If any field was missing, set it
+      if (Object.keys(updateFields).length > 0) {
+        await this.userModel.findByIdAndUpdate(user.userId, {
+          $set: updateFields,
+        });
+      }
+    }
+
+    // Add property to user's propertyOwn array
+    await this.userModel.findByIdAndUpdate(
+      user.userId,
+      { $addToSet: { propertyOwn: savedProperty._id } },
+      { new: true },
+    );
+
+    //! public image link generation
     // Generate signed URLs only (strings)
     const imagesSignedUrls: string[] = await Promise.all(
       (propertyObj.images || []).map(async (img: any) => {
