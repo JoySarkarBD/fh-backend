@@ -22,6 +22,26 @@ export class ArticleService {
     private readonly awsService: AwsService,
   ) {}
 
+  private async resolveArticleImage(
+    image: { key?: string; image?: string } | string | undefined,
+  ): Promise<string | { key?: string; image?: string } | undefined> {
+    if (!image) return image;
+
+    if (typeof image === 'string') {
+      return image;
+    }
+
+    if (image.key) {
+      try {
+        return await this.awsService.generateSignedUrl(image.key);
+      } catch {
+        return image.image || image.key;
+      }
+    }
+
+    return image.image || image;
+  }
+
   /**
    * Create a New Article
    *
@@ -34,10 +54,11 @@ export class ArticleService {
       createdBy: new Types.ObjectId(user.userId),
     });
     const result = await newArticle.save();
-    let image = await this.awsService.generateSignedUrl(result.image.key);
+    const resultObj = result.toObject();
+    const image = await this.resolveArticleImage(resultObj.image);
 
     return {
-      ...result.toObject(),
+      ...resultObj,
       image,
     };
   }
@@ -72,8 +93,20 @@ export class ArticleService {
 
     const total = await this.ArticleModel.countDocuments();
 
+    const signedArticles = await Promise.all(
+      articles.map(async (article) => {
+        const articleObj = article.toObject();
+        const signedImage = await this.resolveArticleImage(articleObj.image);
+
+        return {
+          ...articleObj,
+          image: signedImage || articleObj.image,
+        };
+      }),
+    );
+
     return {
-      data: articles,
+      data: signedArticles,
       pagination: {
         total,
         page: Number(page),
@@ -97,7 +130,14 @@ export class ArticleService {
     if (!article) {
       throw new NotFoundException(`Article with ID ${id} not found`);
     }
-    return article;
+
+    const articleObj = article.toObject();
+    const signedImage = await this.resolveArticleImage(articleObj.image);
+
+    return {
+      ...articleObj,
+      image: signedImage || articleObj.image,
+    };
   }
 
   /**
@@ -144,9 +184,10 @@ export class ArticleService {
       await this.awsService.deleteFile(oldImageKey).catch(() => {});
     }
 
+    const updatedObj = updatedArticle.toObject();
     const result = {
-      ...updatedArticle.toObject(),
-      image: await this.awsService.generateSignedUrl(updatedArticle.image.key),
+      ...updatedObj,
+      image: await this.resolveArticleImage(updatedObj.image),
     };
 
     return result;
