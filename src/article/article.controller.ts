@@ -8,7 +8,6 @@ import {
   Patch,
   Post,
   Query,
-  UploadedFile,
   UploadedFiles,
   UseGuards,
   UseInterceptors,
@@ -53,21 +52,27 @@ export class ArticleController {
     }),
   )
   async create(
-    @Body() createArticleDto: CreateArticleDto & { image: string },
+    @Body() createArticleDto: CreateArticleDto & { image?: string },
     @CurrentUser() user: AuthUser,
     @UploadedFiles() files: { image?: Express.Multer.File[] },
   ) {
-    const image = files?.image?.[0];
-    if (!image) {
+    const imageFile = files?.image?.[0];
+    let imageUrl: string;
+
+    if (imageFile) {
+      imageUrl = await this.awsService.uploadFile(
+        imageFile,
+        `articles/${user.userId}`,
+      );
+    } else if (
+      typeof createArticleDto.image === 'string' &&
+      createArticleDto.image.trim().length > 0
+    ) {
+      imageUrl = createArticleDto.image.trim();
+    } else {
       throw new BadRequestException('Image is required');
     }
 
-    // Upload image to AWS S3 and get the URL
-    // Upload image to S3
-    const imageUrl = await this.awsService.uploadFile(
-      image,
-      `articles/${user.userId}`,
-    );
     const dtoWithFile = {
       ...createArticleDto,
       image: {
@@ -119,7 +124,7 @@ export class ArticleController {
   )
   async update(
     @Param() param: MongoIdDto,
-    @Body() updateArticleDto: UpdateArticleDto,
+    @Body() updateArticleDto: UpdateArticleDto & { image?: string },
     @CurrentUser() user: AuthUser,
     @UploadedFiles() files: { image?: Express.Multer.File[] },
   ) {
@@ -137,6 +142,15 @@ export class ArticleController {
         this.awsService.extractKeyFromUrl(imageUrl) ?? imageUrl;
       updatedDto.image = {
         key: uploadedImageKey,
+        image: imageUrl,
+      };
+    } else if (
+      typeof updateArticleDto.image === 'string' &&
+      updateArticleDto.image.trim().length > 0
+    ) {
+      const imageUrl = updateArticleDto.image.trim();
+      updatedDto.image = {
+        key: this.awsService.extractKeyFromUrl(imageUrl) ?? imageUrl,
         image: imageUrl,
       };
     }
