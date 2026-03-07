@@ -1,14 +1,20 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+} from '@nestjs/common';
+import { MongoIdDto } from 'src/common/dto/mongoId.dto';
 import { NotificationService } from './notification.service';
-import { CreateNotificationDto } from './dto/create-notification.dto';
-import { UpdateNotificationDto } from './dto/update-notification.dto';
-
 @Controller('notification')
 export class NotificationController {
   constructor(private readonly notificationService: NotificationService) {}
 
   @Post()
-  create(@Body() createNotificationDto: CreateNotificationDto) {
+  create(@Body() createNotificationDto: any) {
     return this.notificationService.create(createNotificationDto);
   }
 
@@ -18,17 +24,17 @@ export class NotificationController {
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.notificationService.findOne(+id);
+  findOne(@Param() param: MongoIdDto) {
+    return this.notificationService.findOne(param.id);
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() updateNotificationDto: UpdateNotificationDto) {
-    return this.notificationService.update(+id, updateNotificationDto);
+  update(@Param() param: MongoIdDto, @Body() updateNotificationDto: any) {
+    return this.notificationService.update(param.id, updateNotificationDto);
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.notificationService.remove(+id);
+  remove(@Param() param: MongoIdDto) {
+    return this.notificationService.remove(param.id);
   }
 }

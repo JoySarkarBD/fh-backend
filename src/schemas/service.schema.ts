@@ -1,20 +1,13 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument } from 'mongoose';
 
 export type ServiceDocument = HydratedDocument<Service>;
 
 // Sub-document schema for service description items
-@Schema({ _id: false, versionKey: false })
+@Schema({ _id: true, versionKey: false })
 export class ServiceDescription {
-  @Prop({
-    type: Types.ObjectId,
-    required: true,
-    default: () => new Types.ObjectId(),
-  })
-  id: Types.ObjectId;
-
   @Prop({ required: true, trim: true })
-  text: string;
+  text!: string;
 }
 
 export const ServiceDescriptionSchema =
@@ -24,10 +17,10 @@ export const ServiceDescriptionSchema =
 @Schema({ timestamps: true, versionKey: false })
 export class Service {
   @Prop({ required: true, trim: true })
-  title: string;
+  title!: string;
 
   @Prop({ required: true, trim: true })
-  subTitle: string;
+  subTitle!: string;
 
   @Prop({
     type: [ServiceDescriptionSchema],
@@ -37,7 +30,7 @@ export class Service {
       message: 'Maximum 4 description items are allowed',
     },
   })
-  description: ServiceDescription[];
+  description!: ServiceDescription[];
 }
 
 export const ServiceSchema = SchemaFactory.createForClass(Service);

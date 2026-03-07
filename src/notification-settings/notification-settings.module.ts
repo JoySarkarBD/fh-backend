@@ -1,11 +1,11 @@
 import { Module } from '@nestjs/common';
-import { NotificationSettingsService } from './notification-settings.service';
-import { NotificationSettingsController } from './notification-settings.controller';
 import { MongooseModule } from '@nestjs/mongoose';
 import {
   NotificationSettings,
   NotificationSettingSchema,
-} from 'src/schemas/notification.settngs.schema';
+} from 'src/schemas/notification.settings.schema';
+import { NotificationSettingsController } from './notification-settings.controller';
+import { NotificationSettingsService } from './notification-settings.service';
 
 @Module({
   imports: [

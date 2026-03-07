@@ -12,13 +12,13 @@ export enum PropertyStatus {
 /**
  * Image Sub Schema
  */
-@Schema({ _id: false })
+@Schema()
 export class ImageItem {
   @Prop({ required: true })
-  key: string; // s3 object key
+  key!: string; // s3 object key
 
   @Prop({ required: true })
-  image: string;
+  image!: string;
 }
 
 export const ImageItemSchema = SchemaFactory.createForClass(ImageItem);
@@ -32,7 +32,7 @@ export class Property {
    * Property Name
    */
   @Prop({ required: true, trim: true })
-  propertyName: string;
+  propertyName!: string;
 
   /**
    * Property Status
@@ -42,49 +42,49 @@ export class Property {
     enum: PropertyStatus,
     default: PropertyStatus.ACTIVE,
   })
-  status: PropertyStatus;
+  status!: PropertyStatus;
 
   /**
    * Overview (QuillJS HTML)
    */
   @Prop({ required: true })
-  overview: string;
+  overview!: string;
 
   /**
    * Key Features (QuillJS HTML)
    */
   @Prop({ required: true })
-  keyFeatures: string;
+  keyFeatures!: string;
 
   /**
    * Bedrooms
    */
   @Prop({ required: true, min: 0 })
-  bedrooms: number;
+  bedrooms!: number;
 
   /**
    * Bathrooms
    */
   @Prop({ required: true, min: 0 })
-  bathrooms: number;
+  bathrooms!: number;
 
   /**
    * Square Feet
    */
   @Prop({ required: true, min: 0 })
-  squareFeet: number;
+  squareFeet!: number;
 
   /**
    * Lot Size
    */
   @Prop({ min: 0 })
-  lotSize: number;
+  lotSize!: number;
 
   /**
    * Price
    */
   @Prop({ required: true, min: 0 })
-  price: number;
+  price!: number;
 
   /**
    * Year Built
@@ -94,31 +94,31 @@ export class Property {
     min: 1800,
     max: new Date().getFullYear(),
   })
-  yearBuilt: number;
+  yearBuilt!: number;
 
   /**
    * More Details (QuillJS HTML)
    */
   @Prop({ required: true })
-  moreDetails: string;
+  moreDetails!: string;
 
   /**
    * Location Map Link
    */
   @Prop({ default: '' })
-  locationMapLink: string;
+  locationMapLink!: string;
 
   /**
    * Publish Status
    */
   @Prop({ default: false })
-  isPublished: boolean;
+  isPublished!: boolean;
 
   /**
    * Schedule publish datetime
    */
   @Prop({ type: Date })
-  sellScheduleAt: Date;
+  sellScheduleAt!: Date;
 
   /**
    * Property Images
@@ -126,7 +126,7 @@ export class Property {
   @Prop({
     type: [ImageItemSchema],
   })
-  images: ImageItem[];
+  images!: ImageItem[];
 
   /**
    * Thumbnail Image
@@ -135,7 +135,7 @@ export class Property {
     type: ImageItemSchema,
     required: true,
   })
-  thumbnail: ImageItem;
+  thumbnail!: ImageItem;
 
   /**
    * Property Owner
@@ -145,7 +145,12 @@ export class Property {
     ref: 'User',
     required: true,
   })
-  propertyOwner: Types.ObjectId;
+  propertyOwner!: Types.ObjectId;
+
+    @Prop({ default: '' })
+  propertyStatus!: string;
+
+
 }
 
 export const PropertySchema = SchemaFactory.createForClass(Property);

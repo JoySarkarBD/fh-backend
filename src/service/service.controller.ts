@@ -17,6 +17,7 @@ import { Roles } from 'src/auth/decorators/roles.decorator';
 import { UserRole } from 'src/schemas/user.schema';
 import { RolesGuard } from 'src/auth/guards/roles.guard';
 import { PaginationDto } from 'src/common/dto/pagination.dto';
+import { MongoIdDto } from 'src/common/dto/mongoId.dto';
 
 @Controller('service')
 export class ServiceController {
@@ -54,8 +55,8 @@ export class ServiceController {
   @Get(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
-  findOne(@Param('id') id: string) {
-    return this.serviceService.findOne(id);
+  findOne(@Param() param: MongoIdDto) {
+    return this.serviceService.findOne(param.id);
   }
 
   /**
@@ -68,8 +69,11 @@ export class ServiceController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   @Patch(':id')
-  update(@Param('id') id: string, @Body() updateServiceDto: UpdateServiceDto) {
-    return this.serviceService.update(id, updateServiceDto);
+  update(
+    @Param() param: MongoIdDto,
+    @Body() updateServiceDto: UpdateServiceDto,
+  ) {
+    return this.serviceService.update(param.id, updateServiceDto);
   }
 
   /**
@@ -81,7 +85,7 @@ export class ServiceController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.serviceService.remove(id);
+  remove(@Param() param: MongoIdDto) {
+    return this.serviceService.remove(param.id);
   }
 }

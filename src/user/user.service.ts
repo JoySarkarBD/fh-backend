@@ -9,6 +9,7 @@ import { User, UserDocument } from 'src/schemas/user.schema';
 import { Model, Types } from 'mongoose';
 import { UserIdDto } from 'src/common/dto/mongoId.dto';
 import { PaginatedMetaDto, PaginationDto } from 'src/common/dto/pagination.dto';
+import { MongoIdDto } from 'src/common/dto/mongoId.dto';
 
 @Injectable()
 export class UserService {
@@ -46,8 +47,6 @@ export class UserService {
     userId: UserIdDto['userId'],
     updateUserDto: UpdateUserDto,
   ) {
-    this.ensureValidObjectId(userId);
-
     const updatedUser = await this.userModel
       .findByIdAndUpdate(userId, updateUserDto, {
         new: true,
@@ -127,7 +126,7 @@ export class UserService {
    * @throws NotFoundException if the user with the given ID does not exist in the database.
    * @throws BadRequestException if the provided ID is not a valid MongoDB ObjectId.
    */
-  async findUserById(id: string) {
+  async findUserById(id: MongoIdDto['id']) {
     const user = await this.getUserByIdOrThrow(id);
 
     return {
@@ -145,9 +144,7 @@ export class UserService {
    * @throws BadRequestException if the provided ID is not a valid MongoDB ObjectId.
    * @throws ForbiddenException if an admin attempts to delete their own account.
    */
-  async removeUserByAdmin(id: string) {
-    this.ensureValidObjectId(id);
-
+  async removeUserByAdmin(id: MongoIdDto['id']) {
     const deletedUser = await this.userModel.findByIdAndDelete(id).lean();
     if (!deletedUser) {
       throw new NotFoundException('User not found');
@@ -167,9 +164,7 @@ export class UserService {
    * @throws NotFoundException if the user with the given ID does not exist in the database.
    * @throws BadRequestException if the provided ID is not a valid MongoDB ObjectId.
    */
-  async suspendToggleByAdmin(id: string) {
-    this.ensureValidObjectId(id);
-
+  async suspendToggleByAdmin(id: MongoIdDto['id']) {
     const user = await this.userModel.findById(id).lean();
     if (!user) {
       throw new NotFoundException('User not found');
@@ -193,16 +188,9 @@ export class UserService {
     };
   }
 
-  private ensureValidObjectId(id: string) {
-    if (!Types.ObjectId.isValid(id)) {
-      throw new BadRequestException('Invalid user id');
-    }
-  }
   // Helper method to fetch user by ID and throw NotFoundException if user does not exist
 
-  private async getUserByIdOrThrow(id: string) {
-    this.ensureValidObjectId(id);
-
+  private async getUserByIdOrThrow(id: MongoIdDto['id']) {
     const user = await this.userModel.findById(id).lean();
     if (!user) {
       throw new NotFoundException('User not found');

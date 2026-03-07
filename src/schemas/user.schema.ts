@@ -11,10 +11,10 @@ export enum UserRole {
 @Schema({ timestamps: true, versionKey: false })
 export class User {
   @Prop({ required: true, trim: true })
-  name: string;
+  name!: string;
 
   @Prop({ required: true, unique: true, trim: true, lowercase: true })
-  email: string;
+  email!: string;
 
   @Prop({ trim: true, unique: true, sparse: true })
   googleId?: string;

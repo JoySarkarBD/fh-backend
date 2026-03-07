@@ -12,19 +12,19 @@ export enum PaymentStatus {
 @Schema({ timestamps: true, versionKey: false })
 export class Payment {
   @Prop({ type: Types.ObjectId, ref: 'User', required: true })
-  user: Types.ObjectId;
+  user!: Types.ObjectId;
 
   @Prop({ required: true, default: 99 })
-  amount: number;
+  amount!: number;
 
   @Prop({ required: true, default: 'usd', lowercase: true, trim: true })
-  currency: string;
+  currency!: string;
 
   @Prop({ required: true, enum: PaymentStatus, default: PaymentStatus.PENDING })
-  status: PaymentStatus;
+  status!: PaymentStatus;
 
   @Prop({ required: true, trim: true, unique: true })
-  transactionId: string;
+  transactionId!: string;
 
   @Prop({ required: false, trim: true })
   stripeCheckoutSessionId?: string;
@@ -33,7 +33,7 @@ export class Payment {
   stripePaymentIntentId?: string;
 
   @Prop({ default: false })
-  lifetimeAccessGranted: boolean;
+  lifetimeAccessGranted!: boolean;
 
   @Prop({ type: Date, required: false })
   paidAt?: Date;
