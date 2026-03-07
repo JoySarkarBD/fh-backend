@@ -119,6 +119,7 @@ export class PropertyService {
   }
 
   async findAll(user: AuthUser, query: Record<string, any>) {
+
     const filters: any = {};
 
     // Pagination
@@ -151,6 +152,7 @@ export class PropertyService {
       if (minPrice !== null) filters.price.$gte = minPrice;
       if (maxPrice !== null) filters.price.$lte = maxPrice;
     }
+    console.log(maxPrice);
 
     const squareFeetArray = toNumberArray(query?.squareFeet);
     if (squareFeetArray.length === 1) filters.squareFeet = squareFeetArray[0];
@@ -173,7 +175,7 @@ export class PropertyService {
     }
 
     if (!user?.role || user.role !== UserRole.ADMIN) {
-      filters.isPosted = true;
+      filters.isPublished = true;
     }
 
     const [properties, total] = await Promise.all([
@@ -324,22 +326,41 @@ export class PropertyService {
 
   async update(
     id: MongoIdDto['id'],
-    updatePropertyDto: UpdatePropertyDto,
+    updatePropertyDto: UpdatePropertyDto & {
+      images?: { key: string; image: string }[];
+      thumbnail?: { key: string; image: string };
+    },
     user: AuthUser,
   ) {
-    const propertyExists = await this.propertyModel.exists({ _id: id });
-    if (!propertyExists) throw new NotFoundException('Property not found');
+    const existingProperty = await this.propertyModel.findById(id);
+    if (!existingProperty) throw new NotFoundException('Property not found');
 
-    const isOwner = await this.propertyModel.exists({
-      _id: id,
-      propertyOwner: user.userId,
-    });
-    if (!isOwner) throw new ForbiddenException('Forbidden');
+    if (String(existingProperty.propertyOwner) !== user.userId) {
+      throw new ForbiddenException('Forbidden');
+    }
 
-    const updated = await this.propertyModel.updateOne(
-      { _id: id },
-      { $set: updatePropertyDto },
-    );
+    const payload: Record<string, any> = { ...updatePropertyDto };
+
+    if (payload.propertyStatus) {
+      payload.status = payload.propertyStatus as PropertyStatus;
+      delete payload.propertyStatus;
+    }
+
+    if (payload.sellPostingDate) {
+      const scheduleValue = `${payload.sellPostingDate}T${payload.sellPostingTime || '00:00'}`;
+      const scheduleDate = new Date(scheduleValue);
+      if (!Number.isNaN(scheduleDate.getTime())) {
+        payload.sellScheduleAt = scheduleDate;
+      }
+    }
+
+    delete payload.sellPostingDate;
+    delete payload.sellPostingTime;
+
+    const updated = await this.propertyModel
+      .findByIdAndUpdate(id, { $set: payload }, { new: true, runValidators: true })
+      .lean();
+
     return updated;
   }
 

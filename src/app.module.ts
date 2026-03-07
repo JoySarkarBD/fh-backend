@@ -16,6 +16,7 @@ import { MailService } from './mail/mail.service';
 import { AwsService } from './common/aws/aws.service';
 import { AwsModule } from './common/aws/aws.module';
 import { DocumentModule } from './document/document.module';
+import { SeedModule } from './seed/seed.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { DocumentModule } from './document/document.module';
     MailModule,
     ContactModule,
     DocumentModule,
+    SeedModule,
   ],
 
   controllers: [],
