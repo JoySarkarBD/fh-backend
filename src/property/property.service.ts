@@ -132,17 +132,24 @@ export class PropertyService {
 
     const propertiesWithSignedUrls = await Promise.all(
       properties.map(async (prop) => {
-        const images = await Promise.all(
-          (prop.images || []).map(async (img: any) => ({
-            key: img.key,
-            image: await this.awsService.generateSignedUrl(img.key),
-          })),
-        );
+       const images = await Promise.all(
+  (prop.images || []).map(async (img: any) => {
+    if (!img?.key) return null;
 
-        const thumbnail = {
-          key: prop.thumbnail.key,
-          image: await this.awsService.generateSignedUrl(prop.thumbnail.key),
-        };
+    return {
+      key: img.key,
+      image: await this.awsService.generateSignedUrl(img.key),
+    };
+  }),
+);
+  let thumbnail: { key: string; image: string } | null = null;
+
+if (prop?.thumbnail?.key) {
+  thumbnail = {
+    key: prop.thumbnail.key,
+    image: await this.awsService.generateSignedUrl(prop.thumbnail.key),
+  };
+}
 
         return { ...prop, images, thumbnail };
       }),
@@ -150,11 +157,98 @@ export class PropertyService {
 
     return propertiesWithSignedUrls;
   }
+async findAllOwnProperty(user: AuthUser, query: Record<string, any>) {
+  const page = Number(query?.page) || 1;
+  const limit = Number(query?.limit) || 10;
+  const skip = (page - 1) * limit;
 
-  async findOne(id: MongoIdDto['id']) {
-    const property = await this.propertyModel.findOne({ _id: id });
-    return property;
+  const ownerId = new Types.ObjectId(user.userId);
+
+
+  const filters: any = {
+    propertyOwner: ownerId,
+  };
+
+  const properties = await this.propertyModel
+    .find(filters)
+    .skip(skip)
+    .limit(limit)
+    .sort({ createdAt: -1 })
+    .lean();
+
+  const total = await this.propertyModel.countDocuments(filters);
+
+  const propertiesWithSignedUrls = await Promise.all(
+    properties.map(async (prop) => {
+  const images = await Promise.all(
+  (prop.images || []).map(async (img: any) => {
+    if (!img?.key) return null;
+
+    return {
+      key: img.key,
+      image: await this.awsService.generateSignedUrl(img.key),
+    };
+  }),
+);
+      let thumbnail;
+      if (prop.thumbnail?.key) {
+        thumbnail = {
+          key: prop.thumbnail.key,
+          image: await this.awsService.generateSignedUrl(prop.thumbnail.key),
+        };
+      }
+
+      return {
+        ...prop,
+        images,
+        thumbnail,
+      };
+    }),
+  );
+
+  return {
+    meta: {
+      page,
+      limit,
+      total,
+      totalPage: Math.ceil(total / limit),
+    },
+    data: propertiesWithSignedUrls,
+  };
+}
+async findOne(id: MongoIdDto['id']) {
+  const property = await this.propertyModel.findOne({ _id: id }).lean();
+
+  if (!property) {
+    throw new NotFoundException('Property not found');
   }
+
+  const images = await Promise.all(
+    (property.images || []).map(async (img: any) => {
+      if (!img?.key) return null;
+
+      return {
+        key: img.key,
+        image: await this.awsService.generateSignedUrl(img.key),
+      };
+    }),
+  );
+
+let thumbnail: { key: string; image: string } | null = null;
+
+  if (property?.thumbnail?.key) {
+    thumbnail = {
+      key: property.thumbnail.key,
+      image: await this.awsService.generateSignedUrl(property.thumbnail.key),
+    };
+  }
+
+  return {
+    ...property,
+    images: images.filter(Boolean),
+    thumbnail,
+  };
+}
 
   async update(
     id: MongoIdDto['id'],
