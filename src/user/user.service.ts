@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { InjectModel } from '@nestjs/mongoose';
-import { User, UserDocument } from 'src/schemas/user.schema';
+import { User, UserDocument, UserRole } from 'src/schemas/user.schema';
 import { Model, Types } from 'mongoose';
 import { UserIdDto } from 'src/common/dto/mongoId.dto';
 import { PaginatedMetaDto, PaginationDto } from 'src/common/dto/pagination.dto';
@@ -72,7 +72,19 @@ export class UserService {
    * @throws NotFoundException if no users are found matching the search criteria.
    * @throws BadRequestException if the provided pagination parameters are invalid (e.g., negative page number or limit).
    */
-  async findAllUsers(query: PaginationDto) {
+  async findAllUsers(query: PaginationDto): Promise<{
+    message: string;
+    data: {
+      users: Array<
+        Omit<User, 'password'> & {
+          propertyOwnCount: number;
+          propertyBuyCount: number;
+          propertySellCount: number;
+        }
+      >;
+      pagination: PaginatedMetaDto;
+    };
+  }> {
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
     const search = query.search?.trim();
@@ -87,7 +99,7 @@ export class UserService {
         }
       : {};
 
-    const [users, total] = await Promise.all([
+    const [users, total]: [UserDocument[], number] = await Promise.all([
       this.userModel
         .find(filter)
         .sort({ createdAt: -1 })
@@ -112,7 +124,21 @@ export class UserService {
     return {
       message: 'Users fetched successfully',
       data: {
-        users: users.map((user) => this.sanitizeUser(user)),
+        users: users.map((user) => {
+          const sanitized = this.sanitizeUser(user);
+          return {
+            ...sanitized,
+            propertyOwnCount: Array.isArray(user.propertyOwn)
+              ? user.propertyOwn.length
+              : 0,
+            propertyBuyCount: Array.isArray(user.propertyBuy)
+              ? user.propertyBuy.length
+              : 0,
+            propertySellCount: Array.isArray(user.propertySell)
+              ? user.propertySell.length
+              : 0,
+          };
+        }),
         pagination,
       },
     };
