@@ -4,6 +4,7 @@ import {
   IsEnum,
   IsNumber,
   IsOptional,
+  isString,
   IsString,
   IsUrl,
   Min,
@@ -14,10 +15,15 @@ export class CreatePropertyDto {
   @IsString({ message: 'Property name is required' })
   propertyName!: string;
 
-  @IsEnum(PropertyStatus, {
-    message: `Status - (allowed values: ${Object.values(PropertyStatus).join(', ')})`,
-  })
-  status!: PropertyStatus;
+  // @IsEnum(PropertyStatus, {
+  //   message: `Status - (allowed values: ${Object.values(PropertyStatus).join(', ')})`,
+  // })
+  // status!: PropertyStatus;
+
+
+
+  @IsString({ message: 'Overview is required' })
+  propertyStatus: string;
 
   @IsString({ message: 'Overview is required' })
   overview!: string;
@@ -58,7 +64,7 @@ export class CreatePropertyDto {
   moreDetails!: string;
 
   @IsOptional()
-  @IsUrl({}, { message: 'Location map link must be a valid URL' })
+  // @IsUrl({}, { message: 'Location map link must be a valid URL' })
   locationMapLink?: string;
 
   @IsOptional()

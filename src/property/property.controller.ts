@@ -111,6 +111,12 @@ export class PropertyController {
     console.log(user);
     return this.propertyService.findAll(user, query);
   }
+  @UseGuards(JwtAuthGuard, SubscribedUserGuard)
+  @Get('me')
+  findAllOwnProperty(@CurrentUser() user: AuthUser, @Query() query: Record<string, any>) {
+    console.log(user);
+    return this.propertyService.findAllOwnProperty(user, query);
+  }
 
   @Get(':id')
   findOne(@Param() param: MongoIdDto) {
