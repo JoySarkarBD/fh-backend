@@ -2,15 +2,29 @@ import { Injectable, Logger } from '@nestjs/common';
 import { CreateContactDto } from './dto/create-contact.dto';
 import { MailService } from 'src/mail/mail.service';
 import { config } from 'src/config/app.config';
+import { InjectModel } from '@nestjs/mongoose';
+import { Contact, ContactDocument } from 'src/schemas/contact.schema';
+import { Model } from 'mongoose';
 
 @Injectable()
 export class ContactService {
   private readonly logger = new Logger(ContactService.name);
 
-  constructor(private readonly mailService: MailService) {}
+  constructor(
+    private readonly mailService: MailService,
+    @InjectModel(Contact.name)
+    private readonly contactModel: Model<ContactDocument>,
+  ) {}
 
   async create(createContactDto: CreateContactDto) {
     const { firstName, lastName, email, message } = createContactDto;
+
+    await this.contactModel.create({
+      firstName,
+      lastName,
+      email,
+      message,
+    });
 
     const subject = 'New Contact Message from Website';
 

@@ -37,6 +37,13 @@ export class PaymentController {
     return this.paymentService.create(user);
   }
 
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.USER)
+  @Get('my-history')
+  findMyHistory(@CurrentUser() user: AuthUser) {
+    return this.paymentService.findMyHistory(user);
+  }
+
   @Get()
   findAll() {
     return this.paymentService.findAll();

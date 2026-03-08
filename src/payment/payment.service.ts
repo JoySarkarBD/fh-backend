@@ -186,7 +186,7 @@ export class PaymentService {
 
   async create(user: AuthUser) {
     const data = await this.createCheckoutSession(user.userId, {
-      successUrl: `${config.FRONTEND_BASE_URL}/payment/success`,
+      successUrl: `${config.FRONTEND_BASE_URL}/dashboard/profile/subscription?payment=success`,
       cancelUrl: `${config.FRONTEND_BASE_URL}/payment/cancel`,
     });
 
@@ -204,6 +204,19 @@ export class PaymentService {
 
     return {
       message: 'Payments fetched successfully',
+      data: payments,
+    };
+  }
+
+  async findMyHistory(user: AuthUser) {
+    this.ensureValidObjectId(user.userId);
+
+    const payments = await this.paymentModel
+      .find({ user: new Types.ObjectId(user.userId) })
+      .sort({ createdAt: -1 });
+
+    return {
+      message: 'Payment history fetched successfully',
       data: payments,
     };
   }

@@ -62,6 +62,13 @@ export class UserController {
    */
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
+  @Get('admin/dashboard-stats')
+  getAdminDashboardStats() {
+    return this.userService.getAdminDashboardStats();
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @Get()
   findAllUsers(@Query() query: PaginationDto) {
     return this.userService.findAllUsers(query);
