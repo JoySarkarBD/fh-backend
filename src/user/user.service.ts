@@ -7,6 +7,16 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { InjectModel } from '@nestjs/mongoose';
 import { User, UserDocument, UserRole } from 'src/schemas/user.schema';
 import { Model, Types } from 'mongoose';
+import {
+  Payment,
+  PaymentDocument,
+  PaymentStatus,
+} from 'src/schemas/payment.schema';
+import {
+  Contact,
+  ContactDocument,
+  ContactStatus,
+} from 'src/schemas/contact.schema';
 import { UserIdDto } from 'src/common/dto/mongoId.dto';
 import { PaginatedMetaDto, PaginationDto } from 'src/common/dto/pagination.dto';
 import { MongoIdDto } from 'src/common/dto/mongoId.dto';
@@ -15,7 +25,60 @@ import { MongoIdDto } from 'src/common/dto/mongoId.dto';
 export class UserService {
   constructor(
     @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
+    @InjectModel(Payment.name)
+    private readonly paymentModel: Model<PaymentDocument>,
+    @InjectModel(Contact.name)
+    private readonly contactModel: Model<ContactDocument>,
   ) {}
+
+  async getAdminDashboardStats() {
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    const [
+      totalUsers,
+      thisMonthUsers,
+      activeSubscribers,
+      pendingCommunication,
+      revenueAgg,
+    ] = await Promise.all([
+      this.userModel.countDocuments(),
+      this.userModel.countDocuments({
+        createdAt: { $gte: startOfMonth, $lte: now },
+      }),
+      this.userModel.countDocuments({ isSubscribed: true }),
+      this.contactModel.countDocuments({
+        status: ContactStatus.PENDING,
+      }),
+      this.paymentModel.aggregate<{ totalRevenue: number }>([
+        { $match: { status: PaymentStatus.COMPLETED } },
+        {
+          $group: {
+            _id: null,
+            totalRevenue: { $sum: '$amount' },
+          },
+        },
+      ]),
+    ]);
+
+    const totalRevenue = revenueAgg[0]?.totalRevenue ?? 0;
+    const conversionRate =
+      totalUsers > 0
+        ? Number(((activeSubscribers / totalUsers) * 100).toFixed(1))
+        : 0;
+
+    return {
+      message: 'Admin dashboard stats fetched successfully',
+      data: {
+        totalUsers,
+        thisMonthUsers,
+        activeSubscribers,
+        totalRevenue,
+        pendingCommunication,
+        conversionRate,
+      },
+    };
+  }
 
   /**
    * Fetch the profile of the currently authenticated user by their ID.
