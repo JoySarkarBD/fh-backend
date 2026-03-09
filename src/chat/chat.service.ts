@@ -28,6 +28,7 @@ import {
   MessageResponse,
   PaginatedMessages,
 } from './interfaces/chat.interfaces';
+import { AttachmentService } from './services/attachment.service';
 
 @Injectable()
 export class ChatService {
@@ -39,6 +40,8 @@ export class ChatService {
 
     @InjectModel(Message.name)
     private readonly messageModel: Model<MessageDoc>,
+
+    private readonly attachmentService: AttachmentService,
   ) {}
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -147,11 +150,13 @@ export class ChatService {
    *   - Client scrolls UP → calls with `nextCursor` from the last response.
    *
    * @param dto - Validated GetMessagesDto (conversationId, cursor, limit).
+   * @param userId - Authenticated user's MongoDB ObjectId string.
    */
-  async getMessages(dto: GetMessagesDto): Promise<PaginatedMessages> {
+  async getMessages(dto: GetMessagesDto, userId: string): Promise<PaginatedMessages> {
     const limit = dto.limit ?? 20;
     const query: Record<string, unknown> = {
       conversationId: new Types.ObjectId(dto.conversationId),
+      deletedForUsers: { $ne: new Types.ObjectId(userId) },
     };
 
     // Apply cursor: only fetch messages OLDER than the cursor timestamp
@@ -181,6 +186,10 @@ export class ChatService {
         message: m.message,
         attachments: m.attachments,
         status: m.status,
+        isForwarded: m.isForwarded,
+        originalMessageId: m.originalMessageId ? m.originalMessageId.toString() : null,
+        forwardedBy: m.forwardedBy ? m.forwardedBy.toString() : null,
+        isUnsent: m.isUnsent,
         createdAt: (m.createdAt as Date).toISOString(),
       })) as MessageResponse[],
       nextCursor,
@@ -204,13 +213,18 @@ export class ChatService {
   async bulkSaveMessages(payloads: MessagePayload[]): Promise<number> {
     if (payloads.length === 0) return 0;
 
-    // Map raw payloads to MongoDB document shape
     const docs: MessageDocument[] = payloads.map((p) => ({
+      _id: new Types.ObjectId(p._id),
       conversationId: new Types.ObjectId(p.conversationId),
       senderId: new Types.ObjectId(p.senderId),
       message: p.message,
       attachments: p.attachments ?? [],
       status: p.status ?? MessageStatus.SENT,
+      isForwarded: p.isForwarded ?? false,
+      originalMessageId: p.originalMessageId ? new Types.ObjectId(p.originalMessageId) : null,
+      forwardedBy: p.forwardedBy ? new Types.ObjectId(p.forwardedBy) : null,
+      isUnsent: p.isUnsent ?? false,
+      deletedForUsers: p.deletedForUsers ? p.deletedForUsers.map(id => new Types.ObjectId(id)) : [],
       createdAt: new Date(p.createdAt),
     }));
 
@@ -253,5 +267,73 @@ export class ChatService {
     }
 
     return savedCount;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // EVENT-DRIVEN MESSAGE MUTATIONS
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Unsends a message. Sets isUnsent to true, clears text, and removes attachments.
+   * If attachments exist, safely deletes them from S3 (if unused elsewhere).
+   * @returns true if message was found and updated, otherwise false.
+   */
+  async unsendMessage(messageId: string, userId: string): Promise<boolean> {
+    const msg = await this.messageModel.findOne({
+      _id: new Types.ObjectId(messageId),
+      senderId: new Types.ObjectId(userId),
+    });
+
+    if (!msg) return false;
+    if (msg.isUnsent) return true; // Already unsent
+
+    const attachmentsToClean = msg.attachments ? [...msg.attachments] : [];
+
+    msg.isUnsent = true;
+    msg.message = 'This message was unsent';
+    msg.attachments = [];
+    await msg.save();
+
+    // After saving changes, evaluate S3 files for cleanup safely
+    for (const att of attachmentsToClean) {
+      await this.attachmentService.deleteAttachmentIfUnused(att.key);
+    }
+
+    return true;
+  }
+
+  /**
+   * Marks a message as deleted for the specified user (only hides it from their view).
+   */
+  async deleteMessageForMe(messageId: string, userId: string): Promise<boolean> {
+    const result = await this.messageModel.updateOne(
+      { _id: new Types.ObjectId(messageId) },
+      { $addToSet: { deletedForUsers: new Types.ObjectId(userId) } }
+    );
+    return result.modifiedCount > 0 || result.matchedCount > 0;
+  }
+
+  /**
+   * Removes a single attachment from a message by key, and safely deletes from S3 if unused.
+   */
+  async deleteAttachmentFromMessage(messageId: string, attachmentKey: string, userId: string): Promise<boolean> {
+    const msg = await this.messageModel.findOne({
+      _id: new Types.ObjectId(messageId),
+      senderId: new Types.ObjectId(userId), // Only sender can remove attachment
+    });
+
+    if (!msg || !msg.attachments) return false;
+
+    const attachmentIndex = msg.attachments.findIndex((a) => a.key === attachmentKey);
+    if (attachmentIndex === -1) return false;
+
+    // Remove it from array
+    msg.attachments.splice(attachmentIndex, 1);
+    await msg.save();
+
+    // Check if we can delete from S3
+    await this.attachmentService.deleteAttachmentIfUnused(attachmentKey);
+
+    return true;
   }
 }

@@ -14,7 +14,36 @@ import {
   IsUrl,
   MaxLength,
   ArrayMaxSize,
+  IsNumber,
+  IsBoolean,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
+
+export class SendAttachmentDto {
+  @IsString()
+  @IsNotEmpty()
+  key!: string;
+
+  @IsUrl()
+  @IsNotEmpty()
+  url!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  mimeType!: string;
+
+  @IsNumber()
+  size!: number;
+
+  @IsMongoId()
+  @IsNotEmpty()
+  uploadedBy!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  createdAt!: string;
+}
 
 export class SendMessageDto {
   /**
@@ -35,12 +64,25 @@ export class SendMessageDto {
   message!: string;
 
   /**
-   * Optional list of pre-uploaded attachment URLs (S3 / CDN).
+   * Optional list of pre-uploaded attachment objects.
    * Maximum 10 attachments per message.
    */
   @IsOptional()
   @IsArray()
-  @IsUrl({}, { each: true })
+  @ValidateNested({ each: true })
+  @Type(() => SendAttachmentDto)
   @ArrayMaxSize(10)
-  attachments?: string[];
+  attachments?: SendAttachmentDto[];
+
+  @IsOptional()
+  @IsBoolean()
+  isForwarded?: boolean;
+
+  @IsOptional()
+  @IsMongoId()
+  originalMessageId?: string;
+
+  @IsOptional()
+  @IsMongoId()
+  forwardedBy?: string;
 }

@@ -44,6 +44,8 @@ import { ChatMessageConsumer } from './consumers/chat-message.consumer';
 import { ChatService } from './chat.service';
 import { ChatQueueService } from './services/chat-queue.service';
 import { ChatGateway } from './chat.gateway';
+import { AwsModule } from 'src/common/aws/aws.module';
+import { AttachmentService } from './services/attachment.service';
 
 @Module({
   imports: [
@@ -72,6 +74,7 @@ import { ChatGateway } from './chat.gateway';
     // ── JwtModule for WebSocket gateway token verification ────────────────
     // Uses the same secret as the HTTP JwtStrategy.
     JwtModule.register(jwtConfig),
+    AwsModule,
   ],
 
   controllers: [
@@ -83,6 +86,7 @@ import { ChatGateway } from './chat.gateway';
     ChatService, // MongoDB operations (bulkSave, getMessages, etc.)
     ChatQueueService, // RabbitMQ producer (wraps ClientProxy.emit)
     ChatGateway, // Socket.IO WebSocket gateway
+    AttachmentService, // Service for handling S3 attachments safely
   ],
 })
 export class ChatModule {}

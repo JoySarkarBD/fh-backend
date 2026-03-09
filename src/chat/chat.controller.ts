@@ -92,7 +92,10 @@ export class ChatController {
    * }
    */
   @Get('messages')
-  async getMessages(@Query() dto: GetMessagesDto) {
-    return this.chatService.getMessages(dto);
+  async getMessages(
+    @Query() dto: GetMessagesDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.chatService.getMessages(dto, user.userId);
   }
 }

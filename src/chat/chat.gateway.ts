@@ -36,7 +36,7 @@
  *   markedSeen       → broadcast to room when a user marks messages as seen
  */
 
-import { Logger, UsePipes, ValidationPipe } from '@nestjs/common';
+import { Logger, UsePipes, ValidationPipe, Inject } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import {
   ConnectedSocket,
@@ -53,6 +53,10 @@ import { ChatService } from './chat.service';
 import { SendMessageDto } from './dto/send-message.dto';
 import { MessagePayload, SocketUser } from './interfaces/chat.interfaces';
 import { ChatQueueService } from './services/chat-queue.service';
+import { REDIS_COMMANDS } from 'src/redis/redis.constants';
+import Redis from 'ioredis';
+
+import { Types } from 'mongoose';
 
 /**
  * Extend the Socket type to carry authenticated user data after handshake.
@@ -81,6 +85,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly chatService: ChatService,
     private readonly chatQueueService: ChatQueueService,
     private readonly jwtService: JwtService,
+    @Inject(REDIS_COMMANDS.REDIS_CLIENT) private readonly redis: Redis,
   ) {}
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -229,12 +234,16 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
-    // Build the message payload with a precise timestamp
+    // Build the message payload with a precise timestamp and generated ID
     const payload: MessagePayload = {
+      _id: new Types.ObjectId().toString(),
       conversationId: dto.conversationId,
       senderId: userId,
       message: dto.message,
       attachments: dto.attachments ?? [],
+      isForwarded: dto.isForwarded,
+      originalMessageId: dto.originalMessageId,
+      forwardedBy: dto.forwardedBy,
       createdAt: new Date().toISOString(), // Gateway timestamp — preserves order
       status: MessageStatus.SENT,
     };
@@ -292,5 +301,101 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         error instanceof Error ? error.message : 'Unknown error';
       socket.emit('error', { message: errorMessage });
     }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // NEW FEATURES: FORWARD, UNSEND, DELETE, ATTACHMENTS, TYPING
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  @SubscribeMessage('typingStart')
+  async handleTypingStart(
+    @ConnectedSocket() socket: AuthenticatedSocket,
+    @MessageBody() data: { conversationId: string },
+  ): Promise<void> {
+    const { userId } = socket.data.user;
+    const roomName = `conversation:${data.conversationId}`;
+    
+    // Set in Redis with 5 second TTL
+    await this.redis.set(`chat:typing:${data.conversationId}:${userId}`, '1', 'EX', 5);
+    
+    // Broadcast to room (exclude sender ideally, but keeping it simple)
+    socket.to(roomName).emit('typingStart', { conversationId: data.conversationId, userId });
+  }
+
+  @SubscribeMessage('typingStop')
+  async handleTypingStop(
+    @ConnectedSocket() socket: AuthenticatedSocket,
+    @MessageBody() data: { conversationId: string },
+  ): Promise<void> {
+    const { userId } = socket.data.user;
+    const roomName = `conversation:${data.conversationId}`;
+    
+    await this.redis.del(`chat:typing:${data.conversationId}:${userId}`);
+    socket.to(roomName).emit('typingStop', { conversationId: data.conversationId, userId });
+  }
+
+  @SubscribeMessage('unsendMessage')
+  async handleUnsendMessage(
+    @ConnectedSocket() socket: AuthenticatedSocket,
+    @MessageBody() data: { conversationId: string, messageId: string },
+  ): Promise<void> {
+    const { userId } = socket.data.user;
+    const roomName = `conversation:${data.conversationId}`;
+
+    await this.chatQueueService.enqueueMessageUnsent({
+      conversationId: data.conversationId,
+      messageId: data.messageId,
+      userId,
+    });
+
+    // Optimistic broadcast
+    this.server.to(roomName).emit('messageUnsent', {
+      conversationId: data.conversationId,
+      messageId: data.messageId,
+      userId,
+    });
+  }
+
+  @SubscribeMessage('deleteForMe')
+  async handleDeleteForMe(
+    @ConnectedSocket() socket: AuthenticatedSocket,
+    @MessageBody() data: { conversationId: string, messageId: string },
+  ): Promise<void> {
+    const { userId } = socket.data.user;
+    
+    await this.chatQueueService.enqueueMessageDeletedForMe({
+      conversationId: data.conversationId,
+      messageId: data.messageId,
+      userId,
+    });
+
+    // Send confirmation back to the individual socket only
+    socket.emit('messageDeletedForMe', {
+      conversationId: data.conversationId,
+      messageId: data.messageId,
+    });
+  }
+
+  @SubscribeMessage('removeAttachment')
+  async handleRemoveAttachment(
+    @ConnectedSocket() socket: AuthenticatedSocket,
+    @MessageBody() data: { conversationId: string, messageId: string, attachmentKey: string },
+  ): Promise<void> {
+    const { userId } = socket.data.user;
+    const roomName = `conversation:${data.conversationId}`;
+
+    await this.chatQueueService.enqueueAttachmentDeleted({
+      conversationId: data.conversationId,
+      messageId: data.messageId,
+      attachmentKey: data.attachmentKey,
+      userId,
+    });
+
+    // Optimistic broadcast
+    this.server.to(roomName).emit('attachmentRemoved', {
+      conversationId: data.conversationId,
+      messageId: data.messageId,
+      attachmentKey: data.attachmentKey,
+    });
   }
 }

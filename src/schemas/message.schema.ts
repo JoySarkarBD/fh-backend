@@ -24,6 +24,29 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Schema as MongooseSchema, Types } from 'mongoose';
 
+@Schema({ _id: false })
+export class Attachment {
+  @Prop({ required: true })
+  key!: string;
+
+  @Prop({ required: true })
+  url!: string;
+
+  @Prop({ required: true })
+  mimeType!: string;
+
+  @Prop({ required: true })
+  size!: number;
+
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', required: true })
+  uploadedBy!: Types.ObjectId;
+
+  @Prop({ type: Date, default: Date.now })
+  createdAt!: Date;
+}
+
+export const AttachmentSchema = SchemaFactory.createForClass(Attachment);
+
 /** Mongoose hydrated document type for Message. */
 export type MessageDocument = HydratedDocument<Message>;
 
@@ -70,11 +93,10 @@ export class Message {
   message!: string;
 
   /**
-   * Optional array of attachment URLs (S3 pre-signed URLs or CDN links).
-   * Stored as plain strings; file upload handling is done separately.
+   * Optional array of attachments (images, files).
    */
-  @Prop({ type: [String], default: [] })
-  attachments!: string[];
+  @Prop({ type: [AttachmentSchema], default: [] })
+  attachments!: Attachment[];
 
   /**
    * Delivery status of the message.
@@ -82,6 +104,26 @@ export class Message {
    */
   @Prop({ enum: MessageStatus, default: MessageStatus.SENT })
   status!: MessageStatus;
+
+  /** Indicates if the message was forwarded from another conversation. */
+  @Prop({ default: false })
+  isForwarded!: boolean;
+
+  /** Reference to the original message if forwarded. */
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Message', default: null })
+  originalMessageId!: Types.ObjectId | null;
+
+  /** Reference to the user who forwarded the message. */
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', default: null })
+  forwardedBy!: Types.ObjectId | null;
+
+  /** Indicates if the sender unsent this message. */
+  @Prop({ default: false })
+  isUnsent!: boolean;
+
+  /** Array of user IDs who have deleted this message for themselves. */
+  @Prop({ type: [{ type: MongooseSchema.Types.ObjectId, ref: 'User' }], default: [] })
+  deletedForUsers!: Types.ObjectId[];
 
   /**
    * Exact timestamp when the WebSocket gateway received the message.

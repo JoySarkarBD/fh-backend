@@ -41,7 +41,10 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { Ctx, EventPattern, Payload } from '@nestjs/microservices';
+import { Model, Types } from 'mongoose';
+import { InjectModel } from '@nestjs/mongoose';
 import { ChatService } from '../chat.service';
+import { Message, MessageDocument } from 'src/schemas/message.schema';
 import type { MessagePayload } from '../interfaces/chat.interfaces';
 
 @Controller()
@@ -69,7 +72,10 @@ export class ChatMessageConsumer implements OnModuleInit, OnModuleDestroy {
   /** Guards against concurrent flush calls colliding on the same buffer. */
   private isFlushing = false;
 
-  constructor(private readonly chatService: ChatService) {}
+  constructor(
+    private readonly chatService: ChatService,
+    @InjectModel(Message.name) private readonly messageModel: Model<MessageDocument>,
+  ) {}
 
   // ───────────────────────────────────────────────────────────────────────────
   // LIFECYCLE HOOKS
@@ -156,6 +162,87 @@ export class ChatMessageConsumer implements OnModuleInit, OnModuleDestroy {
     } catch (error) {
       // On unexpected error: NACK with requeue so the message isn't lost
       this.logger.error('Failed to buffer chat message', error);
+      channel.nack(originalMsg, false, true);
+    }
+  }
+
+  @EventPattern('message_unsent')
+  async handleMessageUnsent(@Payload() payload: { messageId: string, conversationId: string, userId: string }, @Ctx() context: any): Promise<void> {
+    const channel = context.getChannelRef();
+    const originalMsg = context.getMessage();
+    try {
+      const inBuffer = this.messageBuffer.find(m => m._id === payload.messageId);
+      if (inBuffer && inBuffer.senderId === payload.userId) {
+        inBuffer.isUnsent = true;
+        inBuffer.message = 'This message was unsent';
+        inBuffer.attachments = [];
+        channel.ack(originalMsg);
+        return;
+      }
+      const success = await this.chatService.unsendMessage(payload.messageId, payload.userId);
+      if (!success) {
+        const exists = await this.messageModel.exists({ _id: new Types.ObjectId(payload.messageId) });
+        if (!exists) {
+          channel.nack(originalMsg, false, true);
+          return;
+        }
+      }
+      channel.ack(originalMsg);
+    } catch (error) {
+      this.logger.error('Failed to process message_unsent', error);
+      channel.nack(originalMsg, false, true);
+    }
+  }
+
+  @EventPattern('message_deleted_for_me')
+  async handleMessageDeletedForMe(@Payload() payload: { messageId: string, conversationId: string, userId: string }, @Ctx() context: any): Promise<void> {
+    const channel = context.getChannelRef();
+    const originalMsg = context.getMessage();
+    try {
+      const inBuffer = this.messageBuffer.find(m => m._id === payload.messageId);
+      if (inBuffer) {
+        inBuffer.deletedForUsers = inBuffer.deletedForUsers || [];
+        inBuffer.deletedForUsers.push(payload.userId);
+        channel.ack(originalMsg);
+        return;
+      }
+      const success = await this.chatService.deleteMessageForMe(payload.messageId, payload.userId);
+      if (!success) {
+        const exists = await this.messageModel.exists({ _id: new Types.ObjectId(payload.messageId) });
+        if (!exists) {
+          channel.nack(originalMsg, false, true);
+          return;
+        }
+      }
+      channel.ack(originalMsg);
+    } catch (error) {
+      this.logger.error('Failed to process message_deleted_for_me', error);
+      channel.nack(originalMsg, false, true);
+    }
+  }
+
+  @EventPattern('attachment_deleted')
+  async handleAttachmentDeleted(@Payload() payload: { messageId: string, conversationId: string, attachmentKey: string, userId: string }, @Ctx() context: any): Promise<void> {
+    const channel = context.getChannelRef();
+    const originalMsg = context.getMessage();
+    try {
+      const inBuffer = this.messageBuffer.find(m => m._id === payload.messageId);
+      if (inBuffer && inBuffer.senderId === payload.userId && inBuffer.attachments) {
+        inBuffer.attachments = inBuffer.attachments.filter(a => a.key !== payload.attachmentKey);
+        channel.ack(originalMsg);
+        return;
+      }
+      const success = await this.chatService.deleteAttachmentFromMessage(payload.messageId, payload.attachmentKey, payload.userId);
+      if (!success) {
+        const exists = await this.messageModel.exists({ _id: new Types.ObjectId(payload.messageId) });
+        if (!exists) {
+          channel.nack(originalMsg, false, true);
+          return;
+        }
+      }
+      channel.ack(originalMsg);
+    } catch (error) {
+      this.logger.error('Failed to process attachment_deleted', error);
       channel.nack(originalMsg, false, true);
     }
   }

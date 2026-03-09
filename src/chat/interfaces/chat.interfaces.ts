@@ -8,11 +8,23 @@
 import { Types } from 'mongoose';
 import { MessageStatus } from 'src/schemas/message.schema';
 
+export interface AttachmentPayload {
+  key: string;
+  url: string;
+  mimeType: string;
+  size: number;
+  uploadedBy: string | Types.ObjectId;
+  createdAt: Date | string;
+}
+
 /**
  * The raw payload emitted by the WebSocket gateway and pushed onto
  * the RabbitMQ chat queue.  This is what the consumer reads.
  */
 export interface MessagePayload {
+  /** Generated ObjectId at gateway. */
+  _id: string;
+
   /** MongoDB ObjectId string of the conversation. */
   conversationId: string;
 
@@ -23,10 +35,10 @@ export interface MessagePayload {
   message: string;
 
   /**
-   * Optional list of attachment URLs (S3/CDN).
-   * Already uploaded by the client before emitting the WS event.
+   * Optional list of attachment objects.
+   * Already uploaded to S3 by the client before emitting the WS event.
    */
-  attachments?: string[];
+  attachments?: AttachmentPayload[];
 
   /**
    * ISO-8601 timestamp set by the gateway at the moment the WS event
@@ -36,6 +48,13 @@ export interface MessagePayload {
 
   /** Initial status is always 'sent'. */
   status: MessageStatus;
+
+  isForwarded?: boolean;
+  originalMessageId?: string | null;
+  forwardedBy?: string | null;
+  
+  isUnsent?: boolean;
+  deletedForUsers?: string[];
 }
 
 /**
@@ -46,8 +65,12 @@ export interface MessageResponse {
   conversationId: string;
   senderId: string;
   message: string;
-  attachments: string[];
+  attachments: AttachmentPayload[];
   status: MessageStatus;
+  isForwarded: boolean;
+  originalMessageId: string | null;
+  forwardedBy: string | null;
+  isUnsent: boolean;
   createdAt: string;
 }
 
@@ -83,10 +106,16 @@ export interface SocketUser {
  * Maps MessagePayload to the Message schema shape.
  */
 export interface MessageDocument {
+  _id: Types.ObjectId;
   conversationId: Types.ObjectId;
   senderId: Types.ObjectId;
   message: string;
-  attachments: string[];
+  attachments: AttachmentPayload[];
   status: MessageStatus;
+  isForwarded: boolean;
+  originalMessageId: Types.ObjectId | null;
+  forwardedBy: Types.ObjectId | null;
+  isUnsent: boolean;
+  deletedForUsers: Types.ObjectId[];
   createdAt: Date;
 }
