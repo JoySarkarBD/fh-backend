@@ -1,142 +1,266 @@
-# Real-Time Chat System — Implementation (v3)
+# Farrior Homes — End-to-End Chat Integration Guide (Frontend)
 
-## Overview
-
-The chat system is a highly scalable, real-time messaging architecture utilizing **NestJS**, **Socket.IO**, **RabbitMQ**, **Redis**, and **AWS S3**. 
-It supports advanced features including persistent file attachments, message forwarding, optimistic UI updates, "unsend" functionality, user-specific message deletion, and ephemeral typing indicators.
+This document provides a complete, step-by-step guide for frontend developers to integrate the real-time chat system for Farrior Homes. The system supports text messaging, persistent S3 attachments, forwarding, message redaction (unsend/delete), typing indicators, and read receipts.
 
 ---
 
-## Architecture Flow
+## 1. Authentication & Connection Setup
 
-```text
-Client
-  │
-  ▼  JWT auth on Socket.IO handshake
-WebSocket Gateway
-  │   Immediately emits `messageReceived`, `typingStart`, etc., back to room (optimistic UI)
-  ▼
-RabbitMQ Queues: (durable)
-  │   ← ClientProxy.emit('chat_message', payload)
-  │   ← ClientProxy.emit('message_unsent', payload)
-  │   ← ...
-  ▼
-Chat Message Consumer  (@EventPattern('*'))
-  │   Accumulates messages in memory buffer
-  │   Resolves in-flight race conditions for mutations (unsend, delete)
-  ▼
-Flush Condition (either triggers flush):
-  ├─ Buffer length ≥ 3000   ──┐
-  └─ 30-second timer fires  ──┴──▶  MongoDB insertMany (batch write)
-                                     + ACK each RabbitMQ message
+The chat system requires a valid JWT token. 
+
+### REST API Authentication
+All HTTP requests to `/api/chat/*` must include the `Authorization: Bearer <token>` header.
+
+### WebSocket Connection
+Connect to the Socket.IO server under the `/chat` namespace. You **must** pass the JWT token in the connection handshake, otherwise the server will immediately drop the connection.
+
+```javascript
+import { io } from "socket.io-client";
+
+const socket = io("http://localhost:5000/chat", {
+  auth: {
+    token: "YOUR_JWT_TOKEN_HERE" // Required!
+  },
+  transports: ["websocket"] 
+});
+
+socket.on("connect", () => {
+  console.log("Connected to chat server!");
+});
+
+socket.on("error", (err) => {
+  console.error("Socket error:", err.message);
+});
 ```
 
-### Infrastructure Roles
-
-| Responsibility | Tool |
-|---|---|
-| High-throughput message ingestion & buffering | **RabbitMQ** |
-| Real-time room broadcasting (Socket.IO adapter) | **Redis Pub/Sub** |
-| Ephemeral typing indicators (5s TTL) | **Redis K/V** |
-| Permanent File Storage | **AWS S3** |
-| Primary Database (Conversations & Messages) | **MongoDB** |
-
 ---
 
-## Supported Features & Socket Events
+## 2. Managing Conversations
 
-Clients must connect to the `/chat` namespace and provide a valid JWT token in the handshake payload (`auth: { token: '<JWT>' }`).
+Before you can chat, you need to load the user's conversations or start a new one.
 
-All rooms are strictly named `conversation:<conversationId>`. To receive messages, a client must first join the room.
+### Get All Conversations
+Fetch the list of conversations the current user is a part of. This is usually displayed in the left sidebar.
 
-### 1. Join Conversation
-- **Event (Client → Server):** `joinConversation`
-- **Payload:** `{ conversationId: string }`
-- **Response (Server → Client):** `joinedRoom`
+- **Endpoint:** `GET /api/chat/conversations`
+- **Response:**
+  ```json
+  [
+    {
+      "_id": "conversation-id-1",
+      "participants": ["user-id-1", "user-id-2"],
+      "lastMessage": "Sounds good!",
+      "lastMessageAt": "2026-03-09T10:00:00.000Z",
+      "createdAt": "...",
+      "updatedAt": "..."
+    }
+  ]
+  ```
 
-### 2. Send Message
-- **Event (Client → Server):** `sendMessage`
+### Start a New Conversation
+To start a chat with someone (or multiple people), send a request with their User IDs. If a 1-on-1 conversation already exists, the backend will simply return the existing one.
+
+- **Endpoint:** `POST /api/chat/conversations`
 - **Payload:**
-  ```typescript
+  ```json
   {
-    conversationId: string;
-    message: string;
-    attachments?: Array<{
-      key: string;       // S3 Key
-      url: string;       // S3 Public URL
-      mimeType: string;
-      size: number;
-    }>;
+    "participantIds": ["target-user-id-here"]
   }
   ```
-- **Response (Server → Room):** `messageReceived` (Includes the generated `_id` and full message payload)
-
-### 3. Forward Message
-Forwarding reuses the `sendMessage` event to prevent S3 duplication. The client passes the exact same attachment data along with forwarding metadata.
-- **Event (Client → Server):** `sendMessage`
-- **Payload:**
-  ```typescript
-  {
-    conversationId: string;
-    message: string;
-    attachments?: AttachmentArray; // Reuse the identical attachments array
-    isForwarded: true;
-    originalMessageId: string;
-    forwardedBy: string; // The user ID forwarding the message
-  }
-  ```
-- **Response (Server → Room):** `messageReceived`
-
-### 4. Unsend Message (Everyone)
-Unsends a message for everyone in the room. The text is replaced, and any associated S3 attachments are permanently and safely deleted if they are not forwarded elsewhere.
-- **Event (Client → Server):** `unsendMessage`
-- **Payload:** `{ conversationId: string, messageId: string }`
-- **Response (Server → Room):** `messageUnsent`
-
-### 5. Delete Message (For Me)
-Hides the message for the requesting user only. It remains visible to other participants.
-- **Event (Client → Server):** `deleteForMe`
-- **Payload:** `{ conversationId: string, messageId: string }`
-- **Response (Server → Emitting Client Only):** `messageDeletedForMe`
-
-### 6. Remove Attachment
-Removes a specific attachment from a message. Like Unsend, it safely evaluates S3 keys and deletes the object from AWS if no other messages reference it.
-- **Event (Client → Server):** `removeAttachment`
-- **Payload:** `{ conversationId: string, messageId: string, attachmentKey: string }`
-- **Response (Server → Room):** `attachmentRemoved`
-
-### 7. Typing Indicators
-Utilizes Redis with a 5-second TTL to ensure indicators do not get stuck if a client disconnects unexpectedly.
-- **Event (Client → Server):** `typingStart` / `typingStop`
-- **Payload:** `{ conversationId: string }`
-- **Response (Server → Room):** `typingStart` / `typingStop` (Includes `userId`)
-
-### 8. Mark Seen
-Updates the read receipt status.
-- **Event (Client → Server):** `markSeen`
-- **Payload:** `{ conversationId: string }`
-- **Response (Server → Room):** `markedSeen` (Includes `seenBy` and `seenAt`)
 
 ---
 
-## Safe S3 Deletion Architecture
+## 3. Loading Message History (Cursor Pagination)
 
-Because users can forward messages (which inherently reuses identical S3 files without duplicating them to save storage costs), we must be extremely careful when users "Unsend" or "Remove" an attachment.
+When a user clicks on a conversation, fetch the historical messages. The system uses **cursor-based pagination** for high performance.
 
-All attachment-deletion workflows route through the `AttachmentService`:
-1. The service searches the `Message` collection for any documents whose `attachments.key` matches the S3 file key.
-2. If `count <= 1` (meaning only the current message being modified points to it), the file is safely deleted from AWS S3 using `@aws-sdk/client-s3`.
-3. If `count > 1`, the file is left untouched in AWS, but the reference is successfully removed from the current message.
+- **Endpoint:** `GET /api/chat/messages?conversationId=<CONVERSATION_ID>&limit=20`
+
+### Pagination Logic:
+1. **First Load:** Call the endpoint without a `cursor`. You will get the most recent 20 messages.
+2. **Scrolling Up:** Look at the `nextCursor` value returned by the server. To load older messages, pass it in your next request: 
+   `GET /api/chat/messages?conversationId=<ID>&limit=20&cursor=<NEXT_CURSOR>`
+3. **End of History:** Stop fetching when `nextCursor` is `null`.
+
+**Response Format:**
+```json
+{
+  "messages": [
+    {
+      "_id": "message-id",
+      "conversationId": "conversation-id",
+      "senderId": "user-id",
+      "message": "Hello!",
+      "attachments": [],
+      "status": "sent",
+      "isForwarded": false,
+      "isUnsent": false,
+      "deletedForUsers": [],
+      "createdAt": "2026-03-09T10:05:00.000Z"
+    }
+  ],
+  "nextCursor": "2026-03-09T10:04:00.000Z",
+  "count": 20
+}
+```
+
+> **UI Note:** Filter out any messages where your own `userId` exists inside the `deletedForUsers` array (these are messages you chose to "Delete for me").
 
 ---
 
-## Mutation Race Condition Handling
+## 4. Real-Time Socket Events
 
-Because messages are bulk-inserted in increments up to 30 seconds via RabbitMQ, a user might send a message and quickly click "Unsend" before the message has even reached MongoDB.
+Once a conversation is opened, join the specific room to receive real-time streams.
 
-To handle this cleanly:
-1. All client mutations (`unsendMessage`, `deleteForMe`, `removeAttachment`) are pushed into RabbitMQ queues instead of updating the database directly.
-2. The `ChatMessageConsumer` listens to these events.
-3. Upon receiving a mutation request, the consumer first checks its **in-memory buffer**.
-4. If the target message is still sitting in the buffer, it modifies the JavaScript object directly (e.g., setting `isUnsent = true`), preventing faulty data from ever hitting MongoDB.
-5. If the target message is *not* in the buffer, it means it has already been flushed, and standard MongoDB `updateOne()` calls are executed via the `ChatService`.
+### Join a Room
+**Must be called every time the user opens a chat window.**
+```javascript
+socket.emit("joinConversation", { conversationId: "YOUR_CONVERSATION_ID" });
+
+// Listen for confirmation
+socket.on("joinedRoom", (data) => { ... });
+```
+
+### Sending a Message
+Messages are immediately broadcasted to everyone in the room.
+
+```javascript
+socket.emit("sendMessage", {
+  conversationId: "YOUR_CONVERSATION_ID",
+  message: "Hey, check out these files!",
+  attachments: [ // Optional
+    {
+      key: "s3/folder/file123.jpg",
+      url: "https://your-s3-bucket.../file123.jpg",
+      mimeType: "image/jpeg",
+      size: 102450
+    }
+  ]
+});
+```
+
+### Receiving a Message
+Listen for incoming messages (this includes messages YOU just sent, enabling optimistic UI updates instantly).
+
+```javascript
+socket.on("messageReceived", (message) => {
+  // Append to your local message state array
+  console.log("New message:", message);
+});
+```
+
+---
+
+## 5. Advanced Message Actions
+
+### Forwarding a Message
+Forwarding reuses the `sendMessage` event. Pass the exact same attachments from the original message, plus forwarding metadata. This prevents duplicating files in S3.
+
+```javascript
+socket.emit("sendMessage", {
+  conversationId: "TARGET_CONVERSATION_ID",
+  message: "Original message text",
+  attachments: [ /* exact same attachment objects as original */ ],
+  isForwarded: true,
+  originalMessageId: "ORIGINAL_MSG_ID",
+  forwardedBy: "YOUR_USER_ID"
+});
+```
+
+### Unsend Message (Delete for Everyone)
+Replaces the text with "This message was unsent" and permanently deletes associated attachments from S3 (if not forwarded elsewhere).
+```javascript
+socket.emit("unsendMessage", { 
+  conversationId: "CONVERSATION_ID", 
+  messageId: "MESSAGE_ID" 
+});
+
+// Listener:
+socket.on("messageUnsent", (data) => {
+  // Update UI: Find message by data.messageId, clear text, remove attachments, set isUnsent = true
+});
+```
+
+### Delete Message (For Me Only)
+Hides the message from the current user's screen but leaves it for others.
+```javascript
+socket.emit("deleteForMe", { 
+  conversationId: "CONVERSATION_ID", 
+  messageId: "MESSAGE_ID" 
+});
+
+// Listener:
+socket.on("messageDeletedForMe", (data) => {
+  // Update UI: Remove message by data.messageId from local state completely
+});
+```
+
+### Remove Single Attachment
+Deletes an attachment from a specific message without deleting the whole message text.
+```javascript
+socket.emit("removeAttachment", { 
+  conversationId: "CONVERSATION_ID", 
+  messageId: "MESSAGE_ID",
+  attachmentKey: "s3/folder/file123.jpg"
+});
+
+// Listener:
+socket.on("attachmentRemoved", (data) => {
+  // Update UI: Find message, remove attachment matching data.attachmentKey
+});
+```
+
+---
+
+## 6. Typing Indicators & Read Receipts
+
+### Typing
+Typing indicators use Redis and automatically expire after 5 seconds to prevent ghost typing.
+
+```javascript
+// User starts typing
+socket.emit("typingStart", { conversationId: "CONVERSATION_ID" });
+
+// User stops typing (or blur input)
+socket.emit("typingStop", { conversationId: "CONVERSATION_ID" });
+
+// Listeners:
+socket.on("typingStart", (data) => {
+  // Show "User [data.userId] is typing..."
+});
+
+socket.on("typingStop", (data) => {
+  // Hide typing indicator for [data.userId]
+});
+```
+
+### Mark as Seen
+Inform the room that the user has read the messages.
+
+```javascript
+socket.emit("markSeen", { conversationId: "CONVERSATION_ID" });
+
+// Listener:
+socket.on("markedSeen", (data) => {
+  // data contains { conversationId, seenBy, seenAt }
+  // Update message status checkmarks in UI
+});
+```
+
+---
+
+## 7. Typical Frontend Component Flow
+
+1. **Mount App:** Initialize Socket.IO with JWT.
+2. **Side Panel:** Fetch `GET /api/chat/conversations`. Render list.
+3. **Select Chat:**
+   - Call `GET /api/chat/messages?conversationId=...`
+   - Render messages (scroll to bottom).
+   - Emit `joinConversation` via Socket.
+4. **Chatting:** 
+   - User types -> emits `typingStart`.
+   - User stops -> emits `typingStop`.
+   - User hits Send -> optionally uploads files to S3 first, then emits `sendMessage` with S3 URLs.
+   - Listen to `messageReceived` -> append to list -> scroll to bottom.
+5. **Scroll Up:** Fetch older messages using `nextCursor` until `null`.
+6. **Actions:** Implement context menus for Forward, Unsend, Delete, utilizing the specific Socket endpoints.
