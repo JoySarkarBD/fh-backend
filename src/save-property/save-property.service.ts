@@ -7,8 +7,9 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { AwsService } from 'src/common/aws/aws.service';
 import { AuthUser } from 'src/common/interface/auth-user.interface';
-import { Property } from 'src/schemas/property.schema';
+import { Property, PropertyStatus } from 'src/schemas/property.schema';
 import { SaveProperty } from 'src/schemas/save-property.schema';
+import { User, UserDocument } from 'src/schemas/user.schema';
 
 @Injectable()
 export class SavePropertyService {
@@ -17,6 +18,8 @@ export class SavePropertyService {
     private readonly savePropertyModel: Model<SaveProperty>,
     @InjectModel(Property.name)
     private readonly propertyModel: Model<Property>,
+    @InjectModel(User.name)
+    private readonly userModel: Model<UserDocument>,
     private readonly awsService: AwsService,
   ) {}
 
@@ -158,6 +161,84 @@ export class SavePropertyService {
     return {
       message: 'Saved property removed successfully',
       data: deleted,
+    };
+  }
+
+  async getOverview(user: AuthUser) {
+    const userObjectId = new Types.ObjectId(user.userId);
+    const userDoc = await this.userModel
+      .findById(userObjectId)
+      .select('propertyOwn propertyBuy propertySell')
+      .lean();
+    if (!userDoc) {
+      throw new NotFoundException('User not found');
+    }
+
+    const [savedCount, rentCount, sellingPostCount, recentSaved] =
+      await Promise.all([
+        this.savePropertyModel.countDocuments({ userId: userObjectId }),
+        this.propertyModel.countDocuments({
+          propertyOwner: userObjectId,
+          status: PropertyStatus.RENT,
+        }),
+        this.propertyModel.countDocuments({
+          propertyOwner: userObjectId,
+          status: PropertyStatus.SALE,
+        }),
+        this.savePropertyModel
+          .find({ userId: userObjectId })
+          .populate({ path: 'propertyId' })
+          .sort({ createdAt: -1 })
+          .limit(3)
+          .lean(),
+      ]);
+
+    const recentSavedProperties = await Promise.all(
+      recentSaved
+        .filter((row: any) => row?.propertyId)
+        .map(async (row: any) => {
+          const property = row.propertyId as any;
+
+          let thumbnail: { key: string; image: string } | null = null;
+          if (property?.thumbnail?.key) {
+            thumbnail = {
+              key: property.thumbnail.key,
+              image: await this.awsService.generateSignedUrl(
+                property.thumbnail.key,
+              ),
+            };
+          }
+
+          return {
+            id: row._id?.toString?.() ?? String(row._id),
+            property: {
+              ...property,
+              propertyOwner:
+                property.propertyOwner?.toString?.() ??
+                String(property.propertyOwner),
+              thumbnail,
+            },
+            savedAt: row.createdAt,
+          };
+        }),
+    );
+
+    return {
+      stats: {
+        ownCount: Array.isArray(userDoc.propertyOwn)
+          ? userDoc.propertyOwn.length
+          : 0,
+        buyCount: Array.isArray(userDoc.propertyBuy)
+          ? userDoc.propertyBuy.length
+          : 0,
+        sellCount: Array.isArray(userDoc.propertySell)
+          ? userDoc.propertySell.length
+          : 0,
+        rentCount,
+        savedCount,
+        sellingPostCount,
+      },
+      recentSaved: recentSavedProperties,
     };
   }
 }
