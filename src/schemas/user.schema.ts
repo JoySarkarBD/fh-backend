@@ -66,6 +66,12 @@ export class User {
   @Prop({ trim: true, default: false })
   isSubscribed?: boolean;
 
+  @Prop({ default: false })
+  isOnline?: boolean;
+
+  @Prop({ type: Date, default: null })
+  lastActiveAt?: Date | null;
+
   /**
    * Properties owned by the user
    */

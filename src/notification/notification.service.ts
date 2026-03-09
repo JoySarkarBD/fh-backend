@@ -1,5 +1,4 @@
 import { Injectable } from '@nestjs/common';
-
 import { MongoIdDto } from 'src/common/dto/mongoId.dto';
 @Injectable()
 export class NotificationService {
