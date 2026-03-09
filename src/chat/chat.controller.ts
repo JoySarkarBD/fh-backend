@@ -17,18 +17,26 @@
  * Returns `nextCursor: null` when there are no more older messages.
  */
 
-import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Logger, Post, Query, UploadedFiles, UseGuards, UseInterceptors } from '@nestjs/common';
+import { FilesInterceptor } from '@nestjs/platform-express';
 import { CurrentUser } from 'src/auth/decorators/current-user.decorator';
 import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
 import type { AuthUser } from 'src/common/interface/auth-user.interface';
 import { ChatService } from './chat.service';
 import { CreateConversationDto } from './dto/create-conversation.dto';
 import { GetMessagesDto } from './dto/get-messages.dto';
+import { AttachmentService } from './services/attachment.service';
+import { AttachmentPayload } from './interfaces/chat.interfaces';
 
 @Controller('chat')
 @UseGuards(JwtAuthGuard) // All chat endpoints require authentication
 export class ChatController {
-  constructor(private readonly chatService: ChatService) {}
+  private readonly logger = new Logger(ChatController.name);
+
+  constructor(
+    private readonly chatService: ChatService,
+    private readonly attachmentService: AttachmentService,
+  ) {}
 
   // ─────────────────────────────────────────────────────────────────────────────
   // CONVERSATIONS
@@ -97,5 +105,91 @@ export class ChatController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.chatService.getMessages(dto, user.userId);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // UPLOADS
+  // ─────────────────────────────────────────────────────────────────────────────
+  
+  /**
+   * Upload files to S3 for chat attachments.
+   *
+   * POST /api/chat/upload
+   * Form-Data: files (up to 10 files)
+   * 
+   * Returns list of AttachmentPayload objects to send over sockets.
+   */
+  @Post('upload')
+  @UseInterceptors(
+    FilesInterceptor('files', 10, {
+      fileFilter: (req, file, callback) => {
+        const allowedMimeTypes = [
+          // Images
+          'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml', 'image/bmp',
+          // PDF
+          'application/pdf',
+          // Word
+          'application/msword',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          // PowerPoint
+          'application/vnd.ms-powerpoint',
+          'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+          // Excel
+          'application/vnd.ms-excel',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        ];
+
+        if (!allowedMimeTypes.includes(file.mimetype)) {
+          return callback(
+            new BadRequestException(`Unsupported file type: ${file.mimetype}. Allowed types: Images, PDF, Word, PowerPoint, Excel`),
+            false,
+          );
+        }
+        callback(null, true);
+      },
+      limits: {
+        fileSize: 20 * 1024 * 1024, // 20 MB max
+      },
+    }),
+  )
+  async uploadFiles(
+    @UploadedFiles() files: Express.Multer.File[],
+    @CurrentUser() user: AuthUser,
+  ): Promise<{ urls: AttachmentPayload[] }> {
+    if (!files || files.length === 0) {
+      throw new BadRequestException('No files uploaded');
+    }
+
+    const maxFiles = 10;
+    if (files.length > maxFiles) {
+      throw new BadRequestException(`Maximum ${maxFiles} files allowed`);
+    }
+
+    const payloads: AttachmentPayload[] = [];
+    const timestamp = new Date().toISOString();
+
+    for (const file of files) {
+      try {
+        const url = await this.attachmentService.uploadAttachment(file);
+        
+        // Extract key. Simplistic approach from full URL since aws.service doesn't return the key directly here.
+        const urlObj = new URL(url);
+        const key = urlObj.pathname.substring(1); 
+        
+        payloads.push({
+          key,
+          url,
+          mimeType: file.mimetype,
+          size: file.size,
+          uploadedBy: user.userId,
+          createdAt: timestamp,
+        });
+      } catch (error) {
+        this.logger.error(`Failed to upload file ${file.originalname}`, error);
+        throw new BadRequestException(`Failed to upload file ${file.originalname}`);
+      }
+    }
+
+    return { urls: payloads };
   }
 }
