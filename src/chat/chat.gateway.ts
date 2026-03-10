@@ -374,13 +374,31 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     // ① Enqueue to RabbitMQ (non-blocking) — consumer will batch → MongoDB
     await this.chatQueueService.enqueueMessage(payload);
 
-    // ② Optimistic broadcast: push to all room members immediately
+    // ② Write to Redis immediately so REST GET /chat/messages can see this
+    //    message before the 30-second MongoDB flush fires.
+    //
+    //    Layout:
+    //      chat:buf:{conversationId}  → sorted set  (score = epoch ms, member = messageId)
+    //      chat:msg:{messageId}       → string       (JSON of full payload)
+    //
+    //    Both keys have a 90-second TTL — slightly longer than the 30-second
+    //    flush interval — so they self-clean even if the consumer cleanup fails.
+    const bufKey = `chat:buf:${dto.conversationId}`;
+    const msgKey = `chat:msg:${payload._id}`;
+    const score = new Date(payload.createdAt).getTime();
+    await this.redis.pipeline()
+      .zadd(bufKey, score, payload._id)
+      .set(msgKey, JSON.stringify(payload), 'EX', 90)
+      .expire(bufKey, 90)
+      .exec();
+
+    // ③ Optimistic broadcast: push to all room members immediately
     //    so they don't wait 30 seconds for MongoDB persistence.
     const roomName = `conversation:${dto.conversationId}`;
     this.server.to(roomName).emit('messageReceived', payload);
 
     this.logger.debug(
-      `Message from user ${userId} enqueued and broadcast to room ${roomName}`,
+      `Message from user ${userId} enqueued, Redis-buffered, and broadcast to room ${roomName}`,
     );
   }
 

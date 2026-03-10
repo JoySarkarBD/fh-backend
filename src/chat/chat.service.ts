@@ -9,12 +9,7 @@
  *   - Updating lastMessage snapshot on Conversation after flush
  */
 
-import {
-  Injectable,
-  Logger,
-  NotFoundException,
-  BadRequestException,
-} from '@nestjs/common';
+import { Inject, Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Conversation, ConversationDocument } from 'src/schemas/conversation.schema';
@@ -29,6 +24,8 @@ import {
   PaginatedMessages,
 } from './interfaces/chat.interfaces';
 import { AttachmentService } from './services/attachment.service';
+import { REDIS_COMMANDS } from 'src/redis/redis.constants';
+import Redis from 'ioredis';
 
 @Injectable()
 export class ChatService {
@@ -42,6 +39,9 @@ export class ChatService {
     private readonly messageModel: Model<MessageDoc>,
 
     private readonly attachmentService: AttachmentService,
+
+    @Inject(REDIS_COMMANDS.REDIS_CLIENT)
+    private readonly redis: Redis,
   ) {}
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -74,23 +74,37 @@ export class ChatService {
       ...new Map(allParticipantIds.map((id) => [id.toString(), id])).values(),
     ];
 
-    // For 1-on-1 conversations, try to find an existing one first
+    const propertyObjectId = new Types.ObjectId(dto.propertyId);
+
+    // For 1-on-1 conversations, try to find an existing one for the same property first
     if (uniqueIds.length === 2) {
-      const existing = await this.conversationModel.findOne({
-        // $all with $size guarantees EXACT match (no extra participants)
-        participants: { $all: uniqueIds, $size: 2 },
-      });
+      const existing = await this.conversationModel
+        .findOne({
+          // $all with $size guarantees EXACT match (no extra participants)
+          participants: { $all: uniqueIds, $size: 2 },
+          property: propertyObjectId,
+        })
+        .populate('participants', 'name email profileImage')
+        .populate('property', 'propertyName address price bedrooms bathrooms squareFeet thumbnail');
       if (existing) {
         this.logger.debug(`Reusing existing 1-on-1 conversation: ${existing._id}`);
         return existing;
       }
     }
 
-    const conversation = await this.conversationModel.create({
+    const created = await this.conversationModel.create({
       participants: uniqueIds,
+      property: propertyObjectId,
     });
-    this.logger.log(`Created new conversation: ${conversation._id}`);
-    return conversation;
+
+    // Return populated document
+    const conversation = await this.conversationModel
+      .findById(created._id)
+      .populate('participants', 'name email profileImage')
+      .populate('property', 'propertyName address price bedrooms bathrooms squareFeet thumbnail');
+
+    this.logger.log(`Created new conversation: ${created._id}`);
+    return conversation as ConversationDocument;
   }
 
   /**
@@ -133,6 +147,8 @@ export class ChatService {
       .sort({ lastMessageAt: -1 })
       .limit(fetchLimit)
       .select('-__v')
+      .populate('participants', 'name email profileImage')
+      .populate('property', 'propertyName address price bedrooms bathrooms squareFeet thumbnail')
       .lean()
       .exec() as unknown as ConversationDocument[];
 
@@ -212,36 +228,98 @@ export class ChatService {
       query.createdAt = { $lt: new Date(dto.cursor) };
     }
 
-    const messages = await this.messageModel
+    // ── Step 1: Fetch from MongoDB (already-persisted messages) ──────────────
+    const mongoMessages = await this.messageModel
       .find(query)
-      .sort({ createdAt: -1 }) // Newest first within this page
+      .sort({ createdAt: -1 })
       .limit(limit)
       .lean()
       .exec();
 
-    // The nextCursor is the createdAt of the OLDEST message on this page.
-    // Clients pass this on the next call to load even older messages.
+    // ── Step 2: Fetch buffered messages from Redis ────────────────────────────
+    // These are messages enqueued via socket but not yet flushed to MongoDB.
+    // `chat:buf:{conversationId}` is a sorted set (score = epoch ms).
+    const bufferedMessages: MessageResponse[] = [];
+    if (!dto.cursor) {
+      // Only merge buffer on first page (no cursor) — older pages come from DB.
+      try {
+        const bufKey = `chat:buf:${dto.conversationId}`;
+        // Get all buffered message IDs (newest first)
+        const bufferedIds = await this.redis.zrevrange(bufKey, 0, -1);
+
+        if (bufferedIds.length > 0) {
+          const msgKeys = bufferedIds.map((id) => `chat:msg:${id}`);
+          const rawMessages = await this.redis.mget(...msgKeys);
+
+          for (const raw of rawMessages) {
+            if (!raw) continue;
+            try {
+              const p = JSON.parse(raw) as MessagePayload;
+              // Filter out messages deleted for this user
+              if (p.deletedForUsers?.includes(userId)) continue;
+              // Filter out messages older than cursor (safety check)
+              bufferedMessages.push({
+                _id: p._id,
+                conversationId: p.conversationId,
+                senderId: p.senderId,
+                message: p.isUnsent ? '' : p.message,
+                attachments: p.isUnsent ? [] : (p.attachments ?? []),
+                status: p.status ?? 'sent',
+                isForwarded: p.isForwarded ?? false,
+                originalMessageId: p.originalMessageId ?? null,
+                forwardedBy: p.forwardedBy ?? null,
+                isUnsent: p.isUnsent ?? false,
+                createdAt: p.createdAt,
+              });
+            } catch {
+              // Skip malformed Redis entries
+            }
+          }
+        }
+      } catch (err) {
+        // Redis read failure is non-fatal — fall back to MongoDB-only results
+        this.logger.warn('Redis buffer read failed (non-fatal):', err);
+      }
+    }
+
+    // ── Step 3: Convert MongoDB documents to MessageResponse ─────────────────
+    const dbMessages: MessageResponse[] = mongoMessages.map((m) => ({
+      _id: m._id.toString(),
+      conversationId: m.conversationId.toString(),
+      senderId: m.senderId.toString(),
+      message: m.message,
+      attachments: m.attachments as MessageResponse['attachments'],
+      status: m.status,
+      isForwarded: m.isForwarded,
+      originalMessageId: m.originalMessageId ? m.originalMessageId.toString() : null,
+      forwardedBy: m.forwardedBy ? m.forwardedBy.toString() : null,
+      isUnsent: m.isUnsent,
+      createdAt: (m.createdAt as Date).toISOString(),
+    }));
+
+    // ── Step 4: Merge + deduplicate by _id ───────────────────────────────────
+    // Buffered messages take precedence (they have the latest unsent/deleted state).
+    const dbIdSet = new Set(dbMessages.map((m) => m._id));
+    const uniqueBuffered = bufferedMessages.filter((m) => !dbIdSet.has(m._id));
+    const merged = [...uniqueBuffered, ...dbMessages];
+
+    // Sort newest-first and truncate to the requested page size
+    merged.sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
+    const page = merged.slice(0, limit);
+
+    // nextCursor is the createdAt of the oldest message in this page
     const nextCursor =
-      messages.length === limit
-        ? (messages[messages.length - 1].createdAt as Date).toISOString()
+      mongoMessages.length === limit
+        ? (mongoMessages[mongoMessages.length - 1].createdAt as Date).toISOString()
         : null;
 
     return {
-      messages: messages.map((m) => ({
-        _id: m._id.toString(),
-        conversationId: m.conversationId.toString(),
-        senderId: m.senderId.toString(),
-        message: m.message,
-        attachments: m.attachments,
-        status: m.status,
-        isForwarded: m.isForwarded,
-        originalMessageId: m.originalMessageId ? m.originalMessageId.toString() : null,
-        forwardedBy: m.forwardedBy ? m.forwardedBy.toString() : null,
-        isUnsent: m.isUnsent,
-        createdAt: (m.createdAt as Date).toISOString(),
-      })) as MessageResponse[],
+      messages: page,
       nextCursor,
-      count: messages.length,
+      count: page.length,
     };
   }
 

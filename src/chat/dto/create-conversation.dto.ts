@@ -2,10 +2,13 @@
  * @fileoverview DTO for creating a new conversation via REST API.
  *
  * POST /api/chat/conversations
+ * Body: { participantIds: string[], propertyId: string }
  *
  * The current authenticated user is always added as a participant
  * server-side, so `participantIds` should only contain the OTHER
  * user(s) to add.
+ *
+ * `propertyId` is required — every conversation must be scoped to a property.
  */
 
 import {
@@ -28,4 +31,11 @@ export class CreateConversationDto {
   @ArrayMinSize(1)
   @ArrayMaxSize(49)
   participantIds!: string[];
+
+  /**
+   * The MongoDB ObjectId of the property this conversation is about.
+   * Every conversation must be tied to exactly one property.
+   */
+  @IsMongoId()
+  propertyId!: string;
 }

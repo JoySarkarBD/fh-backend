@@ -35,6 +35,7 @@ import { jwtConfig } from 'src/common/jwt.config';
 // Schemas
 import { Conversation, ConversationSchema } from 'src/schemas/conversation.schema';
 import { Message, MessageSchema } from 'src/schemas/message.schema';
+import { Property, PropertySchema } from 'src/schemas/property.schema';
 
 // Controllers
 import { ChatController } from './chat.controller';
@@ -53,6 +54,7 @@ import { AttachmentService } from './services/attachment.service';
     MongooseModule.forFeature([
       { name: Conversation.name, schema: ConversationSchema },
       { name: Message.name, schema: MessageSchema },
+      { name: Property.name, schema: PropertySchema },
     ]),
 
     // ── RabbitMQ client for the CHAT queue ────────────────────────────────

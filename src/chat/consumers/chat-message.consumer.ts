@@ -31,18 +31,15 @@
  * so no data is lost on graceful shutdown (SIGTERM / SIGINT).
  */
 
-import {
-  Controller,
-  Logger,
-  OnModuleDestroy,
-  OnModuleInit,
-} from '@nestjs/common';
+import { Inject, Controller, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { Ctx, EventPattern, Payload } from '@nestjs/microservices';
 import { Model, Types } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
 import { ChatService } from '../chat.service';
 import { Message, MessageDocument } from 'src/schemas/message.schema';
 import type { MessagePayload } from '../interfaces/chat.interfaces';
+import { REDIS_COMMANDS } from 'src/redis/redis.constants';
+import Redis from 'ioredis';
 
 /** Maximum consecutive failures before a message is dead-lettered (dropped). */
 const MAX_RETRY_COUNT = 3;
@@ -81,6 +78,7 @@ export class ChatMessageConsumer implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly chatService: ChatService,
     @InjectModel(Message.name) private readonly messageModel: Model<MessageDocument>,
+    @Inject(REDIS_COMMANDS.REDIS_CLIENT) private readonly redis: Redis,
   ) {}
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -298,13 +296,35 @@ export class ChatMessageConsumer implements OnModuleInit, OnModuleDestroy {
       this.logger.log(
         `✅ Flush complete: ${savedCount}/${batch.length} messages saved to MongoDB`,
       );
+
+      // ── Clean up Redis write-through buffer ───────────────────────────────
+      // Messages are now in MongoDB, so remove them from Redis to prevent
+      // duplicate results when getChatMessages merges Redis + MongoDB.
+      //
+      // Grouped by conversationId to build one ZREM command per conversation.
+      const pipeline = this.redis.pipeline();
+      const convIds = new Map<string, string[]>(); // convId → [messageId, ...]
+
+      for (const msg of batch) {
+        pipeline.del(`chat:msg:${msg._id}`);
+        if (!convIds.has(msg.conversationId)) convIds.set(msg.conversationId, []);
+        convIds.get(msg.conversationId)!.push(msg._id);
+      }
+
+      for (const [convId, msgIds] of convIds) {
+        pipeline.zrem(`chat:buf:${convId}`, ...msgIds);
+      }
+
+      // Fire-and-forget — cleanup is best-effort; 90s TTL is the safety net
+      pipeline.exec().catch((err) =>
+        this.logger.warn('Redis cleanup after flush failed (non-fatal):', err),
+      );
     } catch (error) {
       this.logger.error(
         `Flush failed for batch of ${batch.length} messages`,
         error,
       );
       // Re-buffer on failure so the next timer cycle will retry.
-      // Prepend to keep original ordering.
       this.messageBuffer.unshift(...batch);
     } finally {
       this.isFlushing = false;
