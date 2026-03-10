@@ -24,6 +24,7 @@ import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
 import type { AuthUser } from 'src/common/interface/auth-user.interface';
 import { ChatService } from './chat.service';
 import { CreateConversationDto } from './dto/create-conversation.dto';
+import { GetConversationsDto } from './dto/get-conversations.dto';
 import { GetMessagesDto } from './dto/get-messages.dto';
 import { AttachmentService } from './services/attachment.service';
 import { AttachmentPayload } from './interfaces/chat.interfaces';
@@ -64,16 +65,25 @@ export class ChatController {
   }
 
   /**
-   * Returns all conversations for the authenticated user,
-   * sorted by most recent activity (newest first).
+   * Returns a cursor-paginated list of conversations for the authenticated user,
+   * sorted by most recent activity (newest first). 20 per page by default.
    *
    * GET /api/chat/conversations
+   * GET /api/chat/conversations?cursor=<ISO>&limit=20
    *
-   * Use this to populate the conversation list / sidebar in the UI.
+   * On first load, omit cursor.  On scroll, pass the `nextCursor` from the
+   * previous response to load the next page of conversations.
    */
   @Get('conversations')
-  async getConversations(@CurrentUser() user: AuthUser) {
-    return this.chatService.getUserConversations(user.userId);
+  async getConversations(
+    @Query() dto: GetConversationsDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.chatService.getUserConversations(
+      user.userId,
+      dto.cursor,
+      dto.limit ?? 20,
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -148,7 +158,7 @@ export class ChatController {
         callback(null, true);
       },
       limits: {
-        fileSize: 20 * 1024 * 1024, // 20 MB max
+        fileSize: 50 * 1024 * 1024, // 50 MB max
       },
     }),
   )

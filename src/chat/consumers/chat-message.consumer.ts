@@ -1,14 +1,7 @@
 /**
  * @fileoverview RabbitMQ consumer for the chat message queue.
  *
- * Mirrors the MailConsumer pattern: decorated with @Controller() and
- * @EventPattern() to receive messages from the global RabbitMQ microservice
- * connection configured in main.ts.
- *
  * ─── BATCH FLUSH STRATEGY ────────────────────────────────────────────────────
- *
- * Individual insertMany() calls for every message would overload MongoDB
- * at high traffic (think 10k+ messages/second).  Instead:
  *
  *   1. Each incoming RabbitMQ message is pushed into `messageBuffer[]`.
  *   2. The RMQ channel.ack() is called immediately after buffering —
@@ -17,16 +10,20 @@
  *        a.  buffer.length >= BATCH_SIZE (3000 messages)
  *        b.  FLUSH_INTERVAL_MS (30 seconds) timer fires
  *
- * This means:
- *   - Under heavy load: flushes happen every 3000 messages.
- *   - Under light load: flushes happen every 30 seconds (no message left behind).
+ * ─── POISON MESSAGE PROTECTION ───────────────────────────────────────────────
+ *
+ * Messages that fail processing more than MAX_RETRY_COUNT times are permanently
+ * rejected (nack without requeue) instead of being re-queued infinitely.
+ *
+ * A retry counter is tracked in-memory (per process) using the message's
+ * unique `_id`. If you run multiple pods, configure RabbitMQ Dead Letter
+ * Exchanges (DLX) at the broker level for cross-pod retry protection.
  *
  * ─── MEMORY SAFETY ───────────────────────────────────────────────────────────
  *
- * Buffer is bounded in practice because:
+ * Buffer is bounded:
  *   - Each flush clears the buffer with `splice(0)`.
  *   - At 3000-msg cap, ~3000 × ~200 bytes ≈ 600 KB peak RAM — negligible.
- *   - RabbitMQ itself caps queue depth via broker settings (durable queue).
  *
  * ─── SHUTDOWN SAFETY ─────────────────────────────────────────────────────────
  *
@@ -46,6 +43,9 @@ import { InjectModel } from '@nestjs/mongoose';
 import { ChatService } from '../chat.service';
 import { Message, MessageDocument } from 'src/schemas/message.schema';
 import type { MessagePayload } from '../interfaces/chat.interfaces';
+
+/** Maximum consecutive failures before a message is dead-lettered (dropped). */
+const MAX_RETRY_COUNT = 3;
 
 @Controller()
 export class ChatMessageConsumer implements OnModuleInit, OnModuleDestroy {
@@ -72,6 +72,12 @@ export class ChatMessageConsumer implements OnModuleInit, OnModuleDestroy {
   /** Guards against concurrent flush calls colliding on the same buffer. */
   private isFlushing = false;
 
+  /**
+   * In-process retry counter for poison messages.
+   * Key: message _id  |  Value: number of failed processing attempts.
+   */
+  private retryCounter = new Map<string, number>();
+
   constructor(
     private readonly chatService: ChatService,
     @InjectModel(Message.name) private readonly messageModel: Model<MessageDocument>,
@@ -81,10 +87,6 @@ export class ChatMessageConsumer implements OnModuleInit, OnModuleDestroy {
   // LIFECYCLE HOOKS
   // ───────────────────────────────────────────────────────────────────────────
 
-  /**
-   * Starts the periodic 30-second flush timer when the NestJS module
-   * is fully initialised.
-   */
   onModuleInit(): void {
     this.flushTimer = setInterval(async () => {
       if (this.messageBuffer.length > 0) {
@@ -96,14 +98,10 @@ export class ChatMessageConsumer implements OnModuleInit, OnModuleDestroy {
     }, this.FLUSH_INTERVAL_MS);
 
     this.logger.log(
-      `Chat message consumer ready — batch size: ${this.BATCH_SIZE}, interval: ${this.FLUSH_INTERVAL_MS / 1000}s`,
+      `Chat message consumer ready — batch size: ${this.BATCH_SIZE}, interval: ${this.FLUSH_INTERVAL_MS / 1000}s, max retries: ${MAX_RETRY_COUNT}`,
     );
   }
 
-  /**
-   * On graceful shutdown: cancel the timer and flush any remaining buffer
-   * so zero messages are lost when the process exits.
-   */
   async onModuleDestroy(): Promise<void> {
     clearInterval(this.flushTimer);
 
@@ -118,7 +116,31 @@ export class ChatMessageConsumer implements OnModuleInit, OnModuleDestroy {
   }
 
   // ───────────────────────────────────────────────────────────────────────────
-  // RABBITMQ EVENT HANDLER
+  // HELPERS
+  // ───────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Returns whether this message has exceeded the retry limit.
+   * If so, logs a warning and clears it from the counter.
+   */
+  private shouldDeadLetter(id: string): boolean {
+    const count = (this.retryCounter.get(id) ?? 0) + 1;
+    this.retryCounter.set(id, count);
+
+    if (count >= MAX_RETRY_COUNT) {
+      this.logger.error(
+        `[DLQ] Message ${id} has failed ${count} times — dead-lettering (dropping permanently).`,
+      );
+      this.retryCounter.delete(id); // Clean up counter
+      return true;
+    }
+
+    this.logger.warn(`[Retry ${count}/${MAX_RETRY_COUNT}] Re-queueing message ${id}`);
+    return false;
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // RABBITMQ EVENT HANDLERS
   // ───────────────────────────────────────────────────────────────────────────
 
   /**
@@ -128,8 +150,6 @@ export class ChatMessageConsumer implements OnModuleInit, OnModuleDestroy {
    *   1. Push onto buffer.
    *   2. ACK immediately (remove from RabbitMQ).
    *   3. Trigger flush if buffer is full.
-   *
-   * MongoDB is only touched during a flush, not per-message.
    */
   @EventPattern('chat_message')
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -141,18 +161,14 @@ export class ChatMessageConsumer implements OnModuleInit, OnModuleDestroy {
     const originalMsg = context.getMessage();
 
     try {
-      // Buffer the message
       this.messageBuffer.push(payload);
-
-      // ACK immediately — removes from RabbitMQ queue.
-      //    The message now lives safely in `messageBuffer` until flushed.
       channel.ack(originalMsg);
+      this.retryCounter.delete(payload._id); // Reset retry count on success
 
       this.logger.debug(
         `Buffered message for conversation ${payload.conversationId} — buffer: ${this.messageBuffer.length}/${this.BATCH_SIZE}`,
       );
 
-      // Flush if we've hit the batch size threshold
       if (this.messageBuffer.length >= this.BATCH_SIZE) {
         this.logger.log(
           `[Batch] Buffer full (${this.BATCH_SIZE} messages). Triggering flush.`,
@@ -160,14 +176,17 @@ export class ChatMessageConsumer implements OnModuleInit, OnModuleDestroy {
         await this.flushBuffer();
       }
     } catch (error) {
-      // On unexpected error: NACK with requeue so the message isn't lost
       this.logger.error('Failed to buffer chat message', error);
-      channel.nack(originalMsg, false, true);
+      const isDLQ = this.shouldDeadLetter(payload._id);
+      // If DLQ, nack without requeue to permanently discard
+      // Otherwise nack with requeue for another attempt
+      channel.nack(originalMsg, false, !isDLQ);
     }
   }
 
   @EventPattern('message_unsent')
-  async handleMessageUnsent(@Payload() payload: { messageId: string, conversationId: string, userId: string }, @Ctx() context: any): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async handleMessageUnsent(@Payload() payload: { messageId: string; conversationId: string; userId: string }, @Ctx() context: any): Promise<void> {
     const channel = context.getChannelRef();
     const originalMsg = context.getMessage();
     try {
@@ -177,25 +196,22 @@ export class ChatMessageConsumer implements OnModuleInit, OnModuleDestroy {
         inBuffer.message = 'This message was unsent';
         inBuffer.attachments = [];
         channel.ack(originalMsg);
+        this.retryCounter.delete(payload.messageId);
         return;
       }
-      const success = await this.chatService.unsendMessage(payload.messageId, payload.userId);
-      if (!success) {
-        const exists = await this.messageModel.exists({ _id: new Types.ObjectId(payload.messageId) });
-        if (!exists) {
-          channel.nack(originalMsg, false, true);
-          return;
-        }
-      }
+      await this.chatService.unsendMessage(payload.messageId, payload.userId);
       channel.ack(originalMsg);
+      this.retryCounter.delete(payload.messageId);
     } catch (error) {
       this.logger.error('Failed to process message_unsent', error);
-      channel.nack(originalMsg, false, true);
+      const isDLQ = this.shouldDeadLetter(payload.messageId);
+      channel.nack(originalMsg, false, !isDLQ);
     }
   }
 
   @EventPattern('message_deleted_for_me')
-  async handleMessageDeletedForMe(@Payload() payload: { messageId: string, conversationId: string, userId: string }, @Ctx() context: any): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async handleMessageDeletedForMe(@Payload() payload: { messageId: string; conversationId: string; userId: string }, @Ctx() context: any): Promise<void> {
     const channel = context.getChannelRef();
     const originalMsg = context.getMessage();
     try {
@@ -204,25 +220,29 @@ export class ChatMessageConsumer implements OnModuleInit, OnModuleDestroy {
         inBuffer.deletedForUsers = inBuffer.deletedForUsers || [];
         inBuffer.deletedForUsers.push(payload.userId);
         channel.ack(originalMsg);
+        this.retryCounter.delete(payload.messageId);
         return;
       }
-      const success = await this.chatService.deleteMessageForMe(payload.messageId, payload.userId);
-      if (!success) {
-        const exists = await this.messageModel.exists({ _id: new Types.ObjectId(payload.messageId) });
-        if (!exists) {
-          channel.nack(originalMsg, false, true);
-          return;
-        }
+      // Check message existence before attempting delete to avoid orphan NACKs
+      const exists = await this.messageModel.exists({ _id: new Types.ObjectId(payload.messageId) });
+      if (!exists) {
+        this.logger.warn(`[deleteForMe] Message ${payload.messageId} not found — acking as non-retryable`);
+        channel.ack(originalMsg); // Message gone — no point re-queueing
+        return;
       }
+      await this.chatService.deleteMessageForMe(payload.messageId, payload.userId);
       channel.ack(originalMsg);
+      this.retryCounter.delete(payload.messageId);
     } catch (error) {
       this.logger.error('Failed to process message_deleted_for_me', error);
-      channel.nack(originalMsg, false, true);
+      const isDLQ = this.shouldDeadLetter(payload.messageId);
+      channel.nack(originalMsg, false, !isDLQ);
     }
   }
 
   @EventPattern('attachment_deleted')
-  async handleAttachmentDeleted(@Payload() payload: { messageId: string, conversationId: string, attachmentKey: string, userId: string }, @Ctx() context: any): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async handleAttachmentDeleted(@Payload() payload: { messageId: string; conversationId: string; attachmentKey: string; userId: string }, @Ctx() context: any): Promise<void> {
     const channel = context.getChannelRef();
     const originalMsg = context.getMessage();
     try {
@@ -230,20 +250,22 @@ export class ChatMessageConsumer implements OnModuleInit, OnModuleDestroy {
       if (inBuffer && inBuffer.senderId === payload.userId && inBuffer.attachments) {
         inBuffer.attachments = inBuffer.attachments.filter(a => a.key !== payload.attachmentKey);
         channel.ack(originalMsg);
+        this.retryCounter.delete(payload.messageId);
         return;
       }
-      const success = await this.chatService.deleteAttachmentFromMessage(payload.messageId, payload.attachmentKey, payload.userId);
-      if (!success) {
-        const exists = await this.messageModel.exists({ _id: new Types.ObjectId(payload.messageId) });
-        if (!exists) {
-          channel.nack(originalMsg, false, true);
-          return;
-        }
+      const exists = await this.messageModel.exists({ _id: new Types.ObjectId(payload.messageId) });
+      if (!exists) {
+        this.logger.warn(`[attachment_deleted] Message ${payload.messageId} not found — acking`);
+        channel.ack(originalMsg);
+        return;
       }
+      await this.chatService.deleteAttachmentFromMessage(payload.messageId, payload.attachmentKey, payload.userId);
       channel.ack(originalMsg);
+      this.retryCounter.delete(payload.messageId);
     } catch (error) {
       this.logger.error('Failed to process attachment_deleted', error);
-      channel.nack(originalMsg, false, true);
+      const isDLQ = this.shouldDeadLetter(payload.messageId);
+      channel.nack(originalMsg, false, !isDLQ);
     }
   }
 
@@ -259,7 +281,6 @@ export class ChatMessageConsumer implements OnModuleInit, OnModuleDestroy {
    * will be picked up on the next flush cycle.
    */
   private async flushBuffer(): Promise<void> {
-    // Guard: only one flush at a time
     if (this.isFlushing) {
       this.logger.debug('Flush already in progress — skipping concurrent call');
       return;

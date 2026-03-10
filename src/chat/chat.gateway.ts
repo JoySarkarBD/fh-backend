@@ -16,24 +16,33 @@
  * The conversationId is a MongoDB ObjectId — it IS persisted to DB.
  * The room name itself is NEVER stored — it is always derived at runtime.
  *
+ * ─── RATE LIMITING ───────────────────────────────────────────────────────────
+ * Each user is allowed at most RATE_LIMIT_MAX messages per RATE_LIMIT_WINDOW_MS.
+ * A Redis sorted set `chat:ratelimit:<userId>` is used as a sliding window.
+ * Excess events are silently dropped with an 'error' event sent to the client.
+ *
  * ─── MESSAGE FLOW ────────────────────────────────────────────────────────────
  *
  *   Client emits 'sendMessage' with { conversationId, message, attachments? }
  *     │
  *     ├─ 1. Validate JWT (already done on connection)
- *     ├─ 2. Verify user is a participant of the conversation
- *     ├─ 3. Enqueue to RabbitMQ via ChatQueueService (async, returns fast)
- *     └─ 4. Broadcast 'messageReceived' to all sockets in the room (optimistic)
- *
- * Persistence happens asynchronously in ChatMessageConsumer — the client
- * sees the message immediately without waiting for MongoDB.
+ *     ├─ 2. Rate limit check via Redis sliding window
+ *     ├─ 3. Sanitize message text (strip HTML/XSS)
+ *     ├─ 4. Verify user is a participant of the conversation
+ *     ├─ 5. Enqueue to RabbitMQ via ChatQueueService (async, returns fast)
+ *     └─ 6. Broadcast 'messageReceived' to all sockets in the room (optimistic)
  *
  * ─── EVENTS EMITTED BY SERVER ────────────────────────────────────────────────
  *
  *   messageReceived  → new message broadcast to room members
- *   error            → sent to the emitting socket on validation failure
+ *   messageUnsent    → message unsent broadcast to room members
+ *   messageDeletedForMe → sent only to the requesting socket
+ *   error            → sent to the emitting socket on validation/rate-limit failure
  *   joinedRoom       → confirmation after socket joins a conversation room
  *   markedSeen       → broadcast to room when a user marks messages as seen
+ *   presenceUpdated  → broadcast to room when user connects/disconnects
+ *   typingStarted    → broadcast to room (excluding sender)
+ *   typingStopped    → broadcast to room (excluding sender)
  */
 
 import { Logger, UsePipes, ValidationPipe, Inject } from '@nestjs/common';
@@ -48,6 +57,8 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const sanitizeHtml = require('sanitize-html') as typeof import('sanitize-html');
 import { MessageStatus } from 'src/schemas/message.schema';
 import { ChatService } from './chat.service';
 import { SendMessageDto } from './dto/send-message.dto';
@@ -67,10 +78,20 @@ interface AuthenticatedSocket extends Socket {
   };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// RATE LIMITING CONSTANTS
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Max events allowed per user within the sliding window. */
+const RATE_LIMIT_MAX = 20;
+
+/** Sliding window duration in milliseconds. */
+const RATE_LIMIT_WINDOW_MS = 10_000; // 10 seconds
+
 @WebSocketGateway({
   namespace: 'chat', // ws://host:port/chat
   cors: {
-    origin: '*', // Adjust to FRONTEND_BASE_URL in production
+    origin: process.env.FRONTEND_BASE_URL ?? '*',
     credentials: true,
   },
 })
@@ -97,6 +118,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
    *
    * Validates the JWT from the handshake. If invalid, the socket is
    * disconnected before any events can be processed.
+   * Also registers the socket in Redis for accurate online-presence tracking.
    */
   async handleConnection(socket: AuthenticatedSocket): Promise<void> {
     const token =
@@ -126,6 +148,20 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         role: payload.role,
       };
 
+      // ── Redis Presence Tracking ──────────────────────────────────────────
+      // Track this socket under the user's set of active sockets.
+      // This allows us to detect disconnection accurately across multiple tabs.
+      const { userId } = socket.data.user;
+      await this.redis.sadd(`chat:sockets:${userId}`, socket.id);
+      await this.redis.set(`chat:presence:${userId}`, '1', 'EX', 86400); // 24h TTL
+
+      // Broadcast to ALL rooms this user is in that they are now online
+      this.server.emit('presenceUpdated', {
+        userId,
+        isOnline: true,
+        lastActiveAt: null,
+      });
+
       this.logger.log(
         `[${socket.id}] Connected — user: ${payload.email} (${payload.sub})`,
       );
@@ -141,12 +177,81 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   /**
    * Called when a client disconnects (browser closed, network lost, etc.).
-   * Socket.IO automatically removes the socket from all rooms it joined, so
-   * no manual cleanup is needed.
+   * Cleans up Redis presence state and broadcasts offline status.
    */
-  handleDisconnect(socket: AuthenticatedSocket): void {
+  async handleDisconnect(socket: AuthenticatedSocket): Promise<void> {
     const userId = socket.data?.user?.userId ?? 'unknown';
-    this.logger.log(`[${socket.id}] Disconnected — user: ${userId}`);
+
+    if (userId !== 'unknown') {
+      // Remove this specific socket from the user's active socket set
+      await this.redis.srem(`chat:sockets:${userId}`, socket.id);
+
+      // Check if the user has any remaining active sockets
+      const remainingSockets = await this.redis.scard(`chat:sockets:${userId}`);
+
+      if (remainingSockets === 0) {
+        // User is fully offline — update presence and notify room
+        const lastActiveAt = new Date().toISOString();
+        await this.redis.set(`chat:lastActive:${userId}`, lastActiveAt, 'EX', 86400);
+        await this.redis.del(`chat:presence:${userId}`);
+
+        this.server.emit('presenceUpdated', {
+          userId,
+          isOnline: false,
+          lastActiveAt,
+        });
+
+        this.logger.log(`[${socket.id}] Disconnected — user ${userId} is now offline`);
+      } else {
+        this.logger.log(
+          `[${socket.id}] Disconnected — user ${userId} still has ${remainingSockets} active socket(s)`,
+        );
+      }
+    } else {
+      this.logger.log(`[${socket.id}] Disconnected — unauthenticated socket`);
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // PRIVATE HELPERS
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Checks if a user has exceeded the message rate limit using a Redis
+   * sorted set as a sliding window log.
+   *
+   * @returns `true` if the user is rate-limited (should be rejected), `false` if OK.
+   */
+  private async isRateLimited(userId: string): Promise<boolean> {
+    const key = `chat:ratelimit:${userId}`;
+    const now = Date.now();
+    const windowStart = now - RATE_LIMIT_WINDOW_MS;
+
+    const pipeline = this.redis.pipeline();
+    // Remove timestamps older than the window
+    pipeline.zremrangebyscore(key, '-inf', windowStart);
+    // Add current timestamp as the event score
+    pipeline.zadd(key, now, `${now}-${Math.random()}`);
+    // Count events in the window
+    pipeline.zcard(key);
+    // Keep the key alive for at least the window duration
+    pipeline.expire(key, Math.ceil(RATE_LIMIT_WINDOW_MS / 1000));
+
+    const results = await pipeline.exec();
+    const count = results?.[2]?.[1] as number ?? 0;
+
+    return count > RATE_LIMIT_MAX;
+  }
+
+  /**
+   * Strips all HTML tags from a message string to prevent XSS injection
+   * when the message is stored and broadcast to other clients.
+   */
+  private sanitizeMessage(message: string): string {
+    return sanitizeHtml(message, {
+      allowedTags: [],       // No HTML allowed
+      allowedAttributes: {}, // No attributes allowed
+    }).trim();
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -202,8 +307,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
    * CLIENT → SERVER: 'sendMessage'
    *
    * Main message sending event.  Receives a message payload, validates it,
-   * enqueues it to RabbitMQ for async MongoDB persistence, and immediately
-   * broadcasts it to all room members for real-time delivery.
+   * sanitizes the text, enforces rate limits, enqueues it to RabbitMQ for
+   * async MongoDB persistence, and immediately broadcasts it to all room
+   * members for real-time delivery.
    *
    * Payload: SendMessageDto { conversationId, message, attachments? }
    * Server emits: 'messageReceived' to all sockets in the conversation room.
@@ -223,6 +329,15 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ): Promise<void> {
     const { userId } = socket.data.user;
 
+    // ── Rate Limit Check ────────────────────────────────────────────────────
+    if (await this.isRateLimited(userId)) {
+      this.logger.warn(`[${socket.id}] Rate limit exceeded for user ${userId}`);
+      socket.emit('error', {
+        message: 'You are sending messages too fast. Please slow down.',
+      });
+      return;
+    }
+
     // Validate user is a participant of the conversation
     // (prevents spoofed conversationIds)
     try {
@@ -234,12 +349,20 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
+    // ── XSS Sanitization ────────────────────────────────────────────────────
+    const cleanMessage = dto.message ? this.sanitizeMessage(dto.message) : '';
+
+    if (!cleanMessage && (!dto.attachments || dto.attachments.length === 0)) {
+      socket.emit('error', { message: 'Message cannot be empty.' });
+      return;
+    }
+
     // Build the message payload with a precise timestamp and generated ID
     const payload: MessagePayload = {
       _id: new Types.ObjectId().toString(),
       conversationId: dto.conversationId,
       senderId: userId,
-      message: dto.message,
+      message: cleanMessage,
       attachments: dto.attachments ?? [],
       isForwarded: dto.isForwarded,
       originalMessageId: dto.originalMessageId,
@@ -268,9 +391,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
    * Broadcasts a 'markedSeen' event to the room so the sender's UI
    * can update the read receipt indicator.
    *
-   * NOTE: Actual status update in MongoDB is done here directly (single write,
-   * not a batch operation) since seen-status updates are infrequent.
-   *
    * Payload: { conversationId: string }
    */
   @SubscribeMessage('markSeen')
@@ -286,7 +406,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       await this.chatService.validateParticipant(data.conversationId, userId);
 
       // Broadcast seen status to the conversation room
-      // (the actual DB update can be done via REST if needed)
       this.server.to(roomName).emit('markedSeen', {
         conversationId: data.conversationId,
         seenBy: userId,
@@ -304,40 +423,51 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // NEW FEATURES: FORWARD, UNSEND, DELETE, ATTACHMENTS, TYPING
+  // FEATURES: TYPING, UNSEND, DELETE, FORWARD
   // ─────────────────────────────────────────────────────────────────────────────
 
-  @SubscribeMessage('typingStart')
-  async handleTypingStart(
+  @SubscribeMessage('typingStarted')
+  async handleTypingStarted(
     @ConnectedSocket() socket: AuthenticatedSocket,
     @MessageBody() data: { conversationId: string },
   ): Promise<void> {
     const { userId } = socket.data.user;
     const roomName = `conversation:${data.conversationId}`;
-    
-    // Set in Redis with 5 second TTL
-    await this.redis.set(`chat:typing:${data.conversationId}:${userId}`, '1', 'EX', 5);
-    
-    // Broadcast to room (exclude sender ideally, but keeping it simple)
-    socket.to(roomName).emit('typingStart', { conversationId: data.conversationId, userId });
+
+    // Store typing state in Redis with 5-second TTL (auto-expires if client crashes)
+    await this.redis.set(
+      `chat:typing:${data.conversationId}:${userId}`,
+      '1',
+      'EX',
+      5,
+    );
+
+    // Broadcast to room (excluded sender via socket.to())
+    socket.to(roomName).emit('typingStarted', {
+      conversationId: data.conversationId,
+      userId,
+    });
   }
 
-  @SubscribeMessage('typingStop')
-  async handleTypingStop(
+  @SubscribeMessage('typingStopped')
+  async handleTypingStopped(
     @ConnectedSocket() socket: AuthenticatedSocket,
     @MessageBody() data: { conversationId: string },
   ): Promise<void> {
     const { userId } = socket.data.user;
     const roomName = `conversation:${data.conversationId}`;
-    
+
     await this.redis.del(`chat:typing:${data.conversationId}:${userId}`);
-    socket.to(roomName).emit('typingStop', { conversationId: data.conversationId, userId });
+    socket.to(roomName).emit('typingStopped', {
+      conversationId: data.conversationId,
+      userId,
+    });
   }
 
   @SubscribeMessage('unsendMessage')
   async handleUnsendMessage(
     @ConnectedSocket() socket: AuthenticatedSocket,
-    @MessageBody() data: { conversationId: string, messageId: string },
+    @MessageBody() data: { conversationId: string; messageId: string },
   ): Promise<void> {
     const { userId } = socket.data.user;
     const roomName = `conversation:${data.conversationId}`;
@@ -348,7 +478,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       userId,
     });
 
-    // Optimistic broadcast
+    // Optimistic broadcast — all room members see the unsent state immediately
     this.server.to(roomName).emit('messageUnsent', {
       conversationId: data.conversationId,
       messageId: data.messageId,
@@ -359,17 +489,17 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('deleteForMe')
   async handleDeleteForMe(
     @ConnectedSocket() socket: AuthenticatedSocket,
-    @MessageBody() data: { conversationId: string, messageId: string },
+    @MessageBody() data: { conversationId: string; messageId: string },
   ): Promise<void> {
     const { userId } = socket.data.user;
-    
+
     await this.chatQueueService.enqueueMessageDeletedForMe({
       conversationId: data.conversationId,
       messageId: data.messageId,
       userId,
     });
 
-    // Send confirmation back to the individual socket only
+    // Send confirmation back ONLY to the requesting socket (private delete)
     socket.emit('messageDeletedForMe', {
       conversationId: data.conversationId,
       messageId: data.messageId,
@@ -379,7 +509,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('removeAttachment')
   async handleRemoveAttachment(
     @ConnectedSocket() socket: AuthenticatedSocket,
-    @MessageBody() data: { conversationId: string, messageId: string, attachmentKey: string },
+    @MessageBody() data: {
+      conversationId: string;
+      messageId: string;
+      attachmentKey: string;
+    },
   ): Promise<void> {
     const { userId } = socket.data.user;
     const roomName = `conversation:${data.conversationId}`;

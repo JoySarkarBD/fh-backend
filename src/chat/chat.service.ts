@@ -94,18 +94,63 @@ export class ChatService {
   }
 
   /**
-   * Returns all conversations for a user, sorted by most recent activity.
+   * Returns a cursor-paginated page of conversations for a user,
+   * sorted by most recent activity (newest first).
+   *
+   * HOW CURSOR PAGINATION WORKS:
+   *   - On the first request: no cursor → return the latest `limit` conversations.
+   *   - On subsequent requests: cursor = ISO timestamp of the OLDEST conversation
+   *     from the previous page → fetch conversations with `lastMessageAt` OLDER
+   *     than that timestamp (scroll-down loads older chats).
    *
    * @param userId - Authenticated user's MongoDB ObjectId string.
+   * @param cursor - Optional ISO-8601 timestamp cursor from a previous response.
+   * @param limit  - Number of conversations per page (default 20).
    */
-  async getUserConversations(userId: string): Promise<ConversationDocument[]> {
-    return this.conversationModel
-      .find({ participants: new Types.ObjectId(userId) })
-      .sort({ lastMessageAt: -1 }) // Most recent first
+  async getUserConversations(
+    userId: string,
+    cursor?: string,
+    limit = 20,
+  ): Promise<{
+    conversations: ConversationDocument[];
+    nextCursor: string | null;
+    hasMore: boolean;
+  }> {
+    const query: Record<string, unknown> = {
+      participants: new Types.ObjectId(userId),
+    };
+
+    // If cursor provided, only fetch conversations older than the cursor timestamp
+    if (cursor) {
+      query['lastMessageAt'] = { $lt: new Date(cursor) };
+    }
+
+    // Fetch one extra record to determine whether there are more pages
+    const fetchLimit = limit + 1;
+
+    const rawConversations = await this.conversationModel
+      .find(query)
+      .sort({ lastMessageAt: -1 })
+      .limit(fetchLimit)
       .select('-__v')
       .lean()
       .exec() as unknown as ConversationDocument[];
+
+    const hasMore = rawConversations.length > limit;
+    const conversations = hasMore
+      ? rawConversations.slice(0, limit)
+      : rawConversations;
+
+    // nextCursor = lastMessageAt of the last item in this page
+    const lastConv = conversations[conversations.length - 1];
+    const nextCursor =
+      hasMore && lastConv
+        ? (lastConv as unknown as { lastMessageAt?: string }).lastMessageAt ?? null
+        : null;
+
+    return { conversations, nextCursor, hasMore };
   }
+
 
   /**
    * Validates that a conversation exists and that the requesting user
