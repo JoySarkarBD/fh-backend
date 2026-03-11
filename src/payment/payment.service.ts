@@ -4,17 +4,17 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
+import { Model, Types } from 'mongoose';
+import { MongoIdDto } from 'src/common/dto/mongoId.dto';
+import { AuthUser } from 'src/common/interface/auth-user.interface';
+import { config } from 'src/config/app.config';
 import {
   Payment,
   PaymentDocument,
   PaymentStatus,
 } from 'src/schemas/payment.schema';
-import { Model, Types } from 'mongoose';
 import Stripe from 'stripe';
 import { User, UserDocument } from '../schemas/user.schema';
-import { config } from 'src/config/app.config';
-import { AuthUser } from 'src/common/interface/auth-user.interface';
-import { MongoIdDto } from 'src/common/dto/mongoId.dto';
 
 @Injectable()
 export class PaymentService {
@@ -66,7 +66,7 @@ export class PaymentService {
     // Create pending payment in DB to link with Stripe session (for later verification in webhook)
     const pendingPayment = await this.paymentModel.create({
       user: new Types.ObjectId(userId),
-      amount: 99,
+      amount: 99, // TODO: USE ENV VARIABLE OR STRIPE API TO GET PRICE
       currency: 'usd',
       status: PaymentStatus.PENDING,
       transactionId: `txn_${Date.now()}_${Math.random().toString(36).slice(2)}`,

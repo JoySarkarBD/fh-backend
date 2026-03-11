@@ -41,7 +41,7 @@ export class NotificationSettingsService {
   ) {
     const updated = await this.notificationSettingModel.updateOne(
       { _id: id },
-      { $set: UpdateNotificationSettingDto },
+      { $set: updateNotificationSettingDto },
     );
     return updated;
   }
