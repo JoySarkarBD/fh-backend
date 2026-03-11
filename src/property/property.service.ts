@@ -7,18 +7,17 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { AwsService } from 'src/common/aws/aws.service';
+import { MongoIdDto } from 'src/common/dto/mongoId.dto';
 import { AuthUser } from 'src/common/interface/auth-user.interface';
 import {
   Property,
   PropertyModerationStatus,
   PropertyStatus,
 } from 'src/schemas/property.schema';
-import { UserRole } from 'src/schemas/user.schema';
-import { User, UserDocument } from 'src/schemas/user.schema';
+import { User, UserDocument, UserRole } from 'src/schemas/user.schema';
 import { CreatePropertyDto } from './dto/create-property.dto';
 import { UpdatePropertyDto } from './dto/update-property.dto';
 import { PropertyResponse } from './property.interface';
-import { MongoIdDto } from 'src/common/dto/mongoId.dto';
 
 @Injectable()
 export class PropertyService {
@@ -133,6 +132,12 @@ export class PropertyService {
       ];
     }
 
+// sellScheduleAt filter
+filters.$or = [
+  { sellScheduleAt: { $exists: false } },
+  { sellScheduleAt: null },
+  { sellScheduleAt: { $lte: new Date() } }, // date + time check
+];
     // Pagination
     const page = Number(query?.page) || 1;
     const limit = Number(query?.limit) || 10;
@@ -357,9 +362,64 @@ export class PropertyService {
       delete payload.propertyStatus;
     }
 
-    if (payload.sellPostingDate) {
-      const scheduleValue = `${payload.sellPostingDate}T${payload.sellPostingTime || '00:00'}`;
-      const scheduleDate = new Date(scheduleValue);
+    const rawPostingDate =
+      typeof payload.sellPostingDate === 'string'
+        ? payload.sellPostingDate.trim()
+        : '';
+    const rawPostingTime =
+      typeof payload.sellPostingTime === 'string'
+        ? payload.sellPostingTime.trim()
+        : '';
+
+    if (rawPostingDate || rawPostingTime) {
+      const existingSchedule = existingProperty.sellScheduleAt
+        ? new Date(existingProperty.sellScheduleAt)
+        : new Date();
+      const baseDate = Number.isNaN(existingSchedule.getTime())
+        ? new Date()
+        : existingSchedule;
+
+      let year = baseDate.getFullYear();
+      let month = baseDate.getMonth();
+      let day = baseDate.getDate();
+      let hours = baseDate.getHours();
+      let minutes = baseDate.getMinutes();
+
+      if (rawPostingDate) {
+        const [y, m, d] = rawPostingDate.split('-').map((part) => Number(part));
+        const isDateValid =
+          Number.isInteger(y) &&
+          Number.isInteger(m) &&
+          Number.isInteger(d) &&
+          m >= 1 &&
+          m <= 12 &&
+          d >= 1 &&
+          d <= 31;
+        if (isDateValid) {
+          year = y;
+          month = m - 1;
+          day = d;
+        }
+      }
+
+      if (rawPostingTime) {
+        const [h, min] = rawPostingTime
+          .split(':')
+          .map((part) => Number(part));
+        const isTimeValid =
+          Number.isInteger(h) &&
+          Number.isInteger(min) &&
+          h >= 0 &&
+          h <= 23 &&
+          min >= 0 &&
+          min <= 59;
+        if (isTimeValid) {
+          hours = h;
+          minutes = min;
+        }
+      }
+
+      const scheduleDate = new Date(year, month, day, hours, minutes, 0, 0);
       if (!Number.isNaN(scheduleDate.getTime())) {
         payload.sellScheduleAt = scheduleDate;
       }
@@ -380,11 +440,16 @@ export class PropertyService {
   }
 
   async remove(id: MongoIdDto['id'], user: AuthUser) {
-    const isOwner = await this.propertyModel.exists({
-      _id: id,
-      propertyOwner: user.userId,
-    });
-    if (!isOwner) throw new ForbiddenException('Forbidden');
+    const property = await this.propertyModel
+      .findById(id)
+      .select('propertyOwner')
+      .lean();
+
+    if (!property) throw new NotFoundException('Property not found');
+
+    if (String(property.propertyOwner) !== String(user.userId)) {
+      throw new ForbiddenException('Forbidden');
+    }
 
     const deleted = await this.propertyModel.deleteOne({ _id: id });
     return deleted;

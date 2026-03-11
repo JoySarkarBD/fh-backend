@@ -1,5 +1,4 @@
 import { Injectable } from '@nestjs/common';
-
 import { MongoIdDto } from 'src/common/dto/mongoId.dto';
 @Injectable()
 export class NotificationService {
@@ -23,3 +22,4 @@ export class NotificationService {
     return `This action removes a #${id} notification`;
   }
 }
+ 
