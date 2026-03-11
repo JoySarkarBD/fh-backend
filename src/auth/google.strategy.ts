@@ -17,7 +17,7 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
       clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
       callbackURL:
         process.env.GOOGLE_CALLBACK_URL ||
-        `${process.env.BACKEND_URL || 'http://localhost:5000'}/api/auth/google/callback`,
+        'http://localhost:5000/api/auth/google/callback',
       scope: ['email', 'profile'],
     });
   }
@@ -62,7 +62,7 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
         await user.save();
       }
 
-      const token = this.jwtService.sign({
+      const token = await this.jwtService.signAsync({
         sub: String(user._id),
         email: user.email,
         role: user.role,
