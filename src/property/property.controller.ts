@@ -12,7 +12,6 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import type { Express } from 'express';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { CurrentUser } from 'src/auth/decorators/current-user.decorator';
@@ -22,12 +21,12 @@ import { OptionalJwtAuthGuard } from 'src/auth/guards/optional-jwt-auth.guard';
 import { RolesGuard } from 'src/auth/guards/roles.guard';
 import { SubscribedUserGuard } from 'src/auth/guards/subscribed-user.guard';
 import { AwsService } from 'src/common/aws/aws.service';
+import { MongoIdDto } from 'src/common/dto/mongoId.dto';
 import type { AuthUser } from 'src/common/interface/auth-user.interface';
 import { UserRole } from 'src/schemas/user.schema';
 import { CreatePropertyDto } from './dto/create-property.dto';
 import { UpdatePropertyDto } from './dto/update-property.dto';
 import { PropertyService } from './property.service';
-import { MongoIdDto } from 'src/common/dto/mongoId.dto';
 
 @Controller('property')
 export class PropertyController {

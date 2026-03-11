@@ -18,6 +18,7 @@ import { RedisModule } from './redis/redis.module';
 import { SeedModule } from './seed/seed.module';
 import { ServiceModule } from './service/service.module';
 import { UserModule } from './user/user.module';
+import { SavePropertyModule } from './save-property/save-property.module';
 
 @Module({
   imports: [
@@ -37,7 +38,7 @@ import { UserModule } from './user/user.module';
     ContactModule,
     DocumentModule,
     ChatModule, // Real-time chat system
-    SeedModule,
+    SeedModule, SavePropertyModule,
   ],
 
   controllers: [],

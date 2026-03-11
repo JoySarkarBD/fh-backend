@@ -1,25 +1,28 @@
 import {
-  BadRequestException,
   Injectable,
-  NotFoundException,
+  NotFoundException
 } from '@nestjs/common';
-import { UpdateUserDto } from './dto/update-user.dto';
 import { InjectModel } from '@nestjs/mongoose';
-import { User, UserDocument, UserRole } from 'src/schemas/user.schema';
-import { Model, Types } from 'mongoose';
+import { Model } from 'mongoose';
+import { MongoIdDto, UserIdDto } from 'src/common/dto/mongoId.dto';
+import { PaginatedMetaDto, PaginationDto } from 'src/common/dto/pagination.dto';
+import {
+  Contact,
+  ContactDocument,
+  ContactStatus,
+} from 'src/schemas/contact.schema';
 import {
   Payment,
   PaymentDocument,
   PaymentStatus,
 } from 'src/schemas/payment.schema';
 import {
-  Contact,
-  ContactDocument,
-  ContactStatus,
-} from 'src/schemas/contact.schema';
-import { UserIdDto } from 'src/common/dto/mongoId.dto';
-import { PaginatedMetaDto, PaginationDto } from 'src/common/dto/pagination.dto';
-import { MongoIdDto } from 'src/common/dto/mongoId.dto';
+  Property,
+  PropertyDocument,
+  PropertyStatus,
+} from 'src/schemas/property.schema';
+import { User, UserDocument } from 'src/schemas/user.schema';
+import { UpdateUserDto } from './dto/update-user.dto';
 
 @Injectable()
 export class UserService {
@@ -29,24 +32,48 @@ export class UserService {
     private readonly paymentModel: Model<PaymentDocument>,
     @InjectModel(Contact.name)
     private readonly contactModel: Model<ContactDocument>,
+    @InjectModel(Property.name)
+    private readonly propertyModel: Model<PropertyDocument>,
   ) {}
 
   async getAdminDashboardStats() {
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfTwelveMonths = new Date(
+      now.getFullYear(),
+      now.getMonth() - 11,
+      1,
+    );
+
+    const monthBuckets = Array.from({ length: 12 }).map((_, index) => {
+      const date = new Date(
+        startOfTwelveMonths.getFullYear(),
+        startOfTwelveMonths.getMonth() + index,
+        1,
+      );
+      return {
+        year: date.getFullYear(),
+        month: date.getMonth() + 1,
+        label: date.toLocaleString('en-US', { month: 'short' }),
+      };
+    });
 
     const [
       totalUsers,
       thisMonthUsers,
       activeSubscribers,
+      inactiveSubscribers,
       pendingCommunication,
       revenueAgg,
+      revenueTrendAgg,
+      sellingOverviewAgg,
     ] = await Promise.all([
       this.userModel.countDocuments(),
       this.userModel.countDocuments({
         createdAt: { $gte: startOfMonth, $lte: now },
       }),
       this.userModel.countDocuments({ isSubscribed: true }),
+      this.userModel.countDocuments({ isSubscribed: false }),
       this.contactModel.countDocuments({
         status: ContactStatus.PENDING,
       }),
@@ -59,6 +86,58 @@ export class UserService {
           },
         },
       ]),
+      this.paymentModel.aggregate<{
+        _id: { year: number; month: number };
+        revenue: number;
+      }>([
+        {
+          $match: {
+            status: PaymentStatus.COMPLETED,
+            $or: [
+              { paidAt: { $gte: startOfTwelveMonths, $lte: now } },
+              {
+                paidAt: { $exists: false },
+                createdAt: { $gte: startOfTwelveMonths, $lte: now },
+              },
+            ],
+          },
+        },
+        {
+          $project: {
+            amount: 1,
+            effectiveDate: { $ifNull: ['$paidAt', '$createdAt'] },
+          },
+        },
+        {
+          $group: {
+            _id: {
+              year: { $year: '$effectiveDate' },
+              month: { $month: '$effectiveDate' },
+            },
+            revenue: { $sum: '$amount' },
+          },
+        },
+      ]),
+      this.propertyModel.aggregate<{
+        _id: { year: number; month: number };
+        sales: number;
+      }>([
+        {
+          $match: {
+            createdAt: { $gte: startOfTwelveMonths, $lte: now },
+            status: { $in: [PropertyStatus.SALE, PropertyStatus.SOLD] },
+          },
+        },
+        {
+          $group: {
+            _id: {
+              year: { $year: '$createdAt' },
+              month: { $month: '$createdAt' },
+            },
+            sales: { $sum: 1 },
+          },
+        },
+      ]),
     ]);
 
     const totalRevenue = revenueAgg[0]?.totalRevenue ?? 0;
@@ -66,6 +145,29 @@ export class UserService {
       totalUsers > 0
         ? Number(((activeSubscribers / totalUsers) * 100).toFixed(1))
         : 0;
+
+    const revenueByMonth = new Map<string, number>(
+      revenueTrendAgg.map((row) => [
+        `${row._id.year}-${row._id.month}`,
+        row.revenue ?? 0,
+      ]),
+    );
+    const salesByMonth = new Map<string, number>(
+      sellingOverviewAgg.map((row) => [
+        `${row._id.year}-${row._id.month}`,
+        row.sales ?? 0,
+      ]),
+    );
+
+    const revenueTrend = monthBuckets.map((bucket) => ({
+      month: bucket.label,
+      revenue: revenueByMonth.get(`${bucket.year}-${bucket.month}`) ?? 0,
+    }));
+
+    const sellingOverview = monthBuckets.map((bucket) => ({
+      month: bucket.label,
+      sales: salesByMonth.get(`${bucket.year}-${bucket.month}`) ?? 0,
+    }));
 
     return {
       message: 'Admin dashboard stats fetched successfully',
@@ -76,6 +178,12 @@ export class UserService {
         totalRevenue,
         pendingCommunication,
         conversionRate,
+        revenueTrend,
+        sellingOverview,
+        userDistribution: {
+          subscribed: activeSubscribers,
+          unsubscribed: inactiveSubscribers,
+        },
       },
     };
   }
