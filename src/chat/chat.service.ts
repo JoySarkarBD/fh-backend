@@ -26,6 +26,7 @@ import {
 import { AttachmentService } from './services/attachment.service';
 import { REDIS_COMMANDS } from 'src/redis/redis.constants';
 import Redis from 'ioredis';
+import { AwsService } from 'src/common/aws/aws.service';
 
 @Injectable()
 export class ChatService {
@@ -37,7 +38,7 @@ export class ChatService {
 
     @InjectModel(Message.name)
     private readonly messageModel: Model<MessageDoc>,
-
+    private readonly awsService: AwsService,
     private readonly attachmentService: AttachmentService,
 
     @Inject(REDIS_COMMANDS.REDIS_CLIENT)
@@ -121,51 +122,104 @@ export class ChatService {
    * @param cursor - Optional ISO-8601 timestamp cursor from a previous response.
    * @param limit  - Number of conversations per page (default 20).
    */
-  async getUserConversations(
-    userId: string,
-    cursor?: string,
-    limit = 20,
-  ): Promise<{
-    conversations: ConversationDocument[];
-    nextCursor: string | null;
-    hasMore: boolean;
-  }> {
-    const query: Record<string, unknown> = {
-      participants: new Types.ObjectId(userId),
-    };
+async getUserConversations(
+  userId: string,
+  cursor?: string,
+  limit = 20,
+): Promise<{
+  conversations: ConversationDocument[];
+  nextCursor: string | null;
+  hasMore: boolean;
+}> {
+  const query: Record<string, unknown> = {
+    participants: new Types.ObjectId(userId),
+  };
 
-    // If cursor provided, only fetch conversations older than the cursor timestamp
-    if (cursor) {
-      query['lastMessageAt'] = { $lt: new Date(cursor) };
-    }
-
-    // Fetch one extra record to determine whether there are more pages
-    const fetchLimit = limit + 1;
-
-    const rawConversations = await this.conversationModel
-      .find(query)
-      .sort({ lastMessageAt: -1 })
-      .limit(fetchLimit)
-      .select('-__v')
-      .populate('participants', 'name email profileImage')
-      .populate('property', 'propertyName address price bedrooms bathrooms squareFeet thumbnail')
-      .lean()
-      .exec() as unknown as ConversationDocument[];
-
-    const hasMore = rawConversations.length > limit;
-    const conversations = hasMore
-      ? rawConversations.slice(0, limit)
-      : rawConversations;
-
-    // nextCursor = lastMessageAt of the last item in this page
-    const lastConv = conversations[conversations.length - 1];
-    const nextCursor =
-      hasMore && lastConv
-        ? (lastConv as unknown as { lastMessageAt?: string }).lastMessageAt ?? null
-        : null;
-
-    return { conversations, nextCursor, hasMore };
+  // If cursor provided, only fetch conversations older than the cursor timestamp
+  if (cursor) {
+    query['lastMessageAt'] = { $lt: new Date(cursor) };
   }
+
+  // Fetch one extra record to determine whether there are more pages
+  const fetchLimit = limit + 1;
+
+  const rawConversations = await this.conversationModel
+    .find(query)
+    .sort({ lastMessageAt: -1 })
+    .limit(fetchLimit)
+    .select('-__v')
+    .populate('participants', 'name email profileImage')
+    .populate('property', 'propertyName address price bedrooms bathrooms squareFeet thumbnail')
+    .lean()
+    .exec() as unknown as ConversationDocument[];
+
+  // Generate signed URLs for property thumbnails
+  const conversations = await Promise.all(
+    rawConversations.map(async (conv) => {
+      // Check if property exists and has thumbnail
+      if (conv.property && (conv.property as any).thumbnail) {
+        const property = conv.property as any;
+        
+        // Generate signed URL for thumbnail
+        if (property.thumbnail) {
+          try {
+            // If thumbnail is a string (key/path)
+            if (typeof property.thumbnail === 'string') {
+              property.thumbnail = await this.awsService.generateSignedUrl(property.thumbnail);
+            } 
+            // If thumbnail is an object with key/image property
+            else if (property.thumbnail && typeof property.thumbnail === 'object') {
+              const thumbnailObj = property.thumbnail as { key?: string; image?: string };
+              const key = thumbnailObj.key || thumbnailObj.image;
+              if (key) {
+                thumbnailObj.image = await this.awsService.generateSignedUrl(key);
+                property.thumbnail = thumbnailObj;
+              }
+            }
+          } catch (error) {
+            console.error(`Failed to generate signed URL for thumbnail:`, error);
+            // Keep original thumbnail on error
+          }
+        }
+      }
+      
+      // Also generate signed URLs for participant profile images if needed
+      if (conv.participants && Array.isArray(conv.participants)) {
+        await Promise.all(
+          conv.participants.map(async (participant: any) => {
+            if (participant.profileImage) {
+              try {
+                participant.profileImage = await this.awsService.generateSignedUrl(participant.profileImage);
+              } catch (error) {
+                console.error(`Failed to generate signed URL for profile image:`, error);
+              }
+            }
+          })
+        );
+      }
+      
+      return conv;
+    })
+  );
+
+  const hasMore = conversations.length > limit;
+  const paginatedConversations = hasMore
+    ? conversations.slice(0, limit)
+    : conversations;
+
+  // nextCursor = lastMessageAt of the last item in this page
+  const lastConv = paginatedConversations[paginatedConversations.length - 1];
+  const nextCursor =
+    hasMore && lastConv
+      ? (lastConv as unknown as { lastMessageAt?: string }).lastMessageAt ?? null
+      : null;
+
+  return { 
+    conversations: paginatedConversations, 
+    nextCursor, 
+    hasMore 
+  };
+}
 
 
   /**

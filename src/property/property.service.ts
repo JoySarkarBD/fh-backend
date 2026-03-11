@@ -118,8 +118,19 @@ export class PropertyService {
   }
 
   async findAll(user: AuthUser, query: Record<string, any>) {
-
-const filters: any = {};
+    const filters: any = {};
+    // Text search by propertyName or address
+    if (
+      query?.search &&
+      typeof query.search === 'string' &&
+      query.search.trim() !== ''
+    ) {
+      const searchRegex = new RegExp(query.search.trim(), 'i');
+      filters.$or = [
+        { propertyName: { $regex: searchRegex } },
+        { address: { $regex: searchRegex } },
+      ];
+    }
 
 // sellScheduleAt filter
 filters.$or = [
@@ -418,7 +429,11 @@ filters.$or = [
     delete payload.sellPostingTime;
 
     const updated = await this.propertyModel
-      .findByIdAndUpdate(id, { $set: payload }, { new: true, runValidators: true })
+      .findByIdAndUpdate(
+        id,
+        { $set: payload },
+        { new: true, runValidators: true },
+      )
       .lean();
 
     return updated;
