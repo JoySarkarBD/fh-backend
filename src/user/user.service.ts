@@ -20,6 +20,7 @@ import {
 import { UserIdDto } from 'src/common/dto/mongoId.dto';
 import { PaginatedMetaDto, PaginationDto } from 'src/common/dto/pagination.dto';
 import { MongoIdDto } from 'src/common/dto/mongoId.dto';
+import { AwsService } from 'src/common/aws/aws.service';
 
 @Injectable()
 export class UserService {
@@ -29,7 +30,38 @@ export class UserService {
     private readonly paymentModel: Model<PaymentDocument>,
     @InjectModel(Contact.name)
     private readonly contactModel: Model<ContactDocument>,
+    private readonly awsService: AwsService,
   ) {}
+
+  private async resolveProfileImage(
+    profileImage?: string,
+  ): Promise<string | undefined> {
+    if (!profileImage) return profileImage;
+
+    const key = this.awsService.extractKeyFromUrl(profileImage);
+    if (!key) return profileImage;
+
+    try {
+      return await this.awsService.generateSignedUrl(key);
+    } catch {
+      return profileImage;
+    }
+  }
+
+  private async sanitizeUserWithResolvedImage<
+    T extends { password?: string; profileImage?: string },
+  >(user: T): Promise<Omit<T, 'password'>> {
+    const sanitized = this.sanitizeUser(user) as Omit<T, 'password'>;
+
+    if ('profileImage' in sanitized) {
+      const resolvedImage = await this.resolveProfileImage(
+        (sanitized as { profileImage?: string }).profileImage,
+      );
+      (sanitized as { profileImage?: string }).profileImage = resolvedImage;
+    }
+
+    return sanitized;
+  }
 
   async getAdminDashboardStats() {
     const now = new Date();
@@ -93,7 +125,7 @@ export class UserService {
 
     return {
       message: 'Profile fetched successfully',
-      data: this.sanitizeUser(user),
+      data: await this.sanitizeUserWithResolvedImage(user),
     };
   }
 
@@ -110,6 +142,16 @@ export class UserService {
     userId: UserIdDto['userId'],
     updateUserDto: UpdateUserDto,
   ) {
+    const existingUser = await this.userModel.findById(userId).lean();
+    if (!existingUser) {
+      throw new NotFoundException('User not found');
+    }
+
+    const oldProfileImageKey =
+      updateUserDto.profileImage && existingUser.profileImage
+        ? this.awsService.extractKeyFromUrl(existingUser.profileImage)
+        : null;
+
     const updatedUser = await this.userModel
       .findByIdAndUpdate(userId, updateUserDto, {
         new: true,
@@ -121,9 +163,13 @@ export class UserService {
       throw new NotFoundException('User not found');
     }
 
+    if (oldProfileImageKey) {
+      await this.awsService.deleteFile(oldProfileImageKey).catch(() => {});
+    }
+
     return {
       message: 'Profile updated successfully',
-      data: this.sanitizeUser(updatedUser),
+      data: await this.sanitizeUserWithResolvedImage(updatedUser),
     };
   }
 
@@ -220,7 +266,7 @@ export class UserService {
 
     return {
       message: 'User fetched successfully',
-      data: this.sanitizeUser(user),
+      data: await this.sanitizeUserWithResolvedImage(user),
     };
   }
 

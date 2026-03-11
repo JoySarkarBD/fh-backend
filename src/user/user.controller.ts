@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -6,7 +7,9 @@ import {
   Param,
   Patch,
   Query,
+  UploadedFiles,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
 import { UserService } from './user.service';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -18,10 +21,16 @@ import { Roles } from 'src/auth/decorators/roles.decorator';
 import { MongoIdDto, UserIdDto } from 'src/common/dto/mongoId.dto';
 import { PaginationDto } from 'src/common/dto/pagination.dto';
 import type { AuthUser } from 'src/common/interface/auth-user.interface';
+import { FileFieldsInterceptor } from '@nestjs/platform-express/multer/interceptors/file-fields.interceptor';
+import { memoryStorage } from 'multer';
+import { AwsService } from 'src/common/aws/aws.service';
 
 @Controller('users')
 export class UserController {
-  constructor(private readonly userService: UserService) {}
+  constructor(
+    private readonly userService: UserService,
+    private readonly awsService: AwsService,
+  ) {}
 
   /**
    * Get the profile of the currently authenticated user.
@@ -45,11 +54,59 @@ export class UserController {
    */
   @UseGuards(JwtAuthGuard)
   @Patch('me')
+  @UseInterceptors(
+    FileFieldsInterceptor([{ name: 'profileImage', maxCount: 1 }], {
+      storage: memoryStorage(),
+      limits: { fileSize: 5 * 1024 * 1024 },
+      fileFilter: (req, file, cb) => {
+        if (!file.mimetype.startsWith('image/')) {
+          return cb(
+            new BadRequestException('Only image files are allowed'),
+            false,
+          );
+        }
+
+        cb(null, true);
+      },
+    }),
+  )
   updateMyProfile(
     @CurrentUser() user: AuthUser,
     @Body() updateUserDto: UpdateUserDto,
+    @UploadedFiles() files: { profileImage?: Express.Multer.File[] },
   ) {
-    return this.userService.updateMyProfile(user.userId, updateUserDto);
+    return this.updateMyProfileWithImage(user, updateUserDto, files);
+  }
+
+  private async updateMyProfileWithImage(
+    user: AuthUser,
+    updateUserDto: UpdateUserDto,
+    files: { profileImage?: Express.Multer.File[] },
+  ) {
+    const updatedDto: UpdateUserDto = { ...updateUserDto };
+    let uploadedImageKey: string | null = null;
+
+    if (files?.profileImage?.[0]) {
+      const imageFile = files.profileImage[0];
+      const imageUrl = await this.awsService.uploadFile(
+        imageFile,
+        `users/${user.userId}/profile`,
+      );
+
+      uploadedImageKey =
+        this.awsService.extractKeyFromUrl(imageUrl) ?? imageUrl;
+      updatedDto.profileImage = imageUrl;
+    }
+
+    try {
+      return await this.userService.updateMyProfile(user.userId, updatedDto);
+    } catch (error) {
+      if (uploadedImageKey) {
+        await this.awsService.deleteFile(uploadedImageKey).catch(() => {});
+      }
+
+      throw error;
+    }
   }
 
   /**
