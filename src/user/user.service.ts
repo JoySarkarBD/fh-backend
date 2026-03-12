@@ -5,7 +5,12 @@ import {
 } from '@nestjs/common';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { InjectModel } from '@nestjs/mongoose';
-import { User, UserDocument, UserRole } from 'src/schemas/user.schema';
+import {
+  ImageItem,
+  User,
+  UserDocument,
+  UserRole,
+} from 'src/schemas/user.schema';
 import { Model, Types } from 'mongoose';
 import {
   Payment,
@@ -22,6 +27,10 @@ import { PaginatedMetaDto, PaginationDto } from 'src/common/dto/pagination.dto';
 import { MongoIdDto } from 'src/common/dto/mongoId.dto';
 import { AwsService } from 'src/common/aws/aws.service';
 
+type UpdateUserPayload = Omit<UpdateUserDto, 'profileImage'> & {
+  profileImage?: string | ImageItem;
+};
+
 @Injectable()
 export class UserService {
   constructor(
@@ -33,31 +42,56 @@ export class UserService {
     private readonly awsService: AwsService,
   ) {}
 
-  private async resolveProfileImage(
-    profileImage?: string,
-  ): Promise<string | undefined> {
+  private getImageKey(profileImage?: ImageItem | string): string | undefined {
     if (!profileImage) return profileImage;
 
-    const key = this.awsService.extractKeyFromUrl(profileImage);
-    if (!key) return profileImage;
+    if (typeof profileImage === 'string') {
+      return this.awsService.extractKeyFromUrl(profileImage) ?? profileImage;
+    }
+
+    if (profileImage.key) {
+      return profileImage.key;
+    }
+
+    if (profileImage.image) {
+      return this.awsService.extractKeyFromUrl(profileImage.image) ?? undefined;
+    }
+
+    return undefined;
+  }
+
+  private async resolveProfileImage(
+    profileImage?: ImageItem | string,
+  ): Promise<string | ImageItem | undefined> {
+    if (!profileImage) return profileImage;
+
+    const key = this.getImageKey(profileImage);
+    if (!key) {
+      return typeof profileImage === 'string'
+        ? profileImage
+        : profileImage.image || profileImage;
+    }
 
     try {
       return await this.awsService.generateSignedUrl(key);
     } catch {
-      return profileImage;
+      return typeof profileImage === 'string'
+        ? profileImage
+        : profileImage.image || profileImage;
     }
   }
 
   private async sanitizeUserWithResolvedImage<
-    T extends { password?: string; profileImage?: string },
+    T extends { password?: string; profileImage?: ImageItem | string },
   >(user: T): Promise<Omit<T, 'password'>> {
     const sanitized = this.sanitizeUser(user) as Omit<T, 'password'>;
 
     if ('profileImage' in sanitized) {
       const resolvedImage = await this.resolveProfileImage(
-        (sanitized as { profileImage?: string }).profileImage,
+        (sanitized as { profileImage?: ImageItem | string }).profileImage,
       );
-      (sanitized as { profileImage?: string }).profileImage = resolvedImage;
+      (sanitized as { profileImage?: ImageItem | string }).profileImage =
+        resolvedImage;
     }
 
     return sanitized;
@@ -140,7 +174,7 @@ export class UserService {
    */
   async updateMyProfile(
     userId: UserIdDto['userId'],
-    updateUserDto: UpdateUserDto,
+    updateUserDto: UpdateUserPayload,
   ) {
     const existingUser = await this.userModel.findById(userId).lean();
     if (!existingUser) {
@@ -149,7 +183,7 @@ export class UserService {
 
     const oldProfileImageKey =
       updateUserDto.profileImage && existingUser.profileImage
-        ? this.awsService.extractKeyFromUrl(existingUser.profileImage)
+        ? this.getImageKey(existingUser.profileImage)
         : null;
 
     const updatedUser = await this.userModel
@@ -233,21 +267,24 @@ export class UserService {
     return {
       message: 'Users fetched successfully',
       data: {
-        users: users.map((user) => {
-          const sanitized = this.sanitizeUser(user);
-          return {
-            ...sanitized,
-            propertyOwnCount: Array.isArray(user.propertyOwn)
-              ? user.propertyOwn.length
-              : 0,
-            propertyBuyCount: Array.isArray(user.propertyBuy)
-              ? user.propertyBuy.length
-              : 0,
-            propertySellCount: Array.isArray(user.propertySell)
-              ? user.propertySell.length
-              : 0,
-          };
-        }),
+        users: await Promise.all(
+          users.map(async (user) => {
+            const sanitized = await this.sanitizeUserWithResolvedImage(user);
+
+            return {
+              ...sanitized,
+              propertyOwnCount: Array.isArray(user.propertyOwn)
+                ? user.propertyOwn.length
+                : 0,
+              propertyBuyCount: Array.isArray(user.propertyBuy)
+                ? user.propertyBuy.length
+                : 0,
+              propertySellCount: Array.isArray(user.propertySell)
+                ? user.propertySell.length
+                : 0,
+            };
+          }),
+        ),
         pagination,
       },
     };

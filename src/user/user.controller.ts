@@ -25,6 +25,10 @@ import { FileFieldsInterceptor } from '@nestjs/platform-express/multer/intercept
 import { memoryStorage } from 'multer';
 import { AwsService } from 'src/common/aws/aws.service';
 
+type UpdateUserPayload = Omit<UpdateUserDto, 'profileImage'> & {
+  profileImage?: string | { key: string; image: string };
+};
+
 @Controller('users')
 export class UserController {
   constructor(
@@ -83,7 +87,7 @@ export class UserController {
     updateUserDto: UpdateUserDto,
     files: { profileImage?: Express.Multer.File[] },
   ) {
-    const updatedDto: UpdateUserDto = { ...updateUserDto };
+    const updatedDto: UpdateUserPayload = { ...updateUserDto };
     let uploadedImageKey: string | null = null;
 
     if (files?.profileImage?.[0]) {
@@ -95,7 +99,19 @@ export class UserController {
 
       uploadedImageKey =
         this.awsService.extractKeyFromUrl(imageUrl) ?? imageUrl;
-      updatedDto.profileImage = imageUrl;
+      updatedDto.profileImage = {
+        key: uploadedImageKey,
+        image: imageUrl,
+      };
+    } else if (
+      typeof updateUserDto.profileImage === 'string' &&
+      updateUserDto.profileImage.trim().length > 0
+    ) {
+      const imageUrl = updateUserDto.profileImage.trim();
+      updatedDto.profileImage = {
+        key: this.awsService.extractKeyFromUrl(imageUrl) ?? imageUrl,
+        image: imageUrl,
+      };
     }
 
     try {
