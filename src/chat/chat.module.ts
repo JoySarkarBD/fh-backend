@@ -33,9 +33,13 @@ import { config } from 'src/config/app.config';
 import { jwtConfig } from 'src/common/jwt.config';
 
 // Schemas
-import { Conversation, ConversationSchema } from 'src/schemas/conversation.schema';
+import {
+  Conversation,
+  ConversationSchema,
+} from 'src/schemas/conversation.schema';
 import { Message, MessageSchema } from 'src/schemas/message.schema';
 import { Property, PropertySchema } from 'src/schemas/property.schema';
+import { User, UserSchema } from 'src/schemas/user.schema';
 
 // Controllers
 import { ChatController } from './chat.controller';
@@ -53,6 +57,7 @@ import { AttachmentService } from './services/attachment.service';
     // ── MongoDB schemas ────────────────────────────────────────────────────
     MongooseModule.forFeature([
       { name: Conversation.name, schema: ConversationSchema },
+      { name: User.name, schema: UserSchema },
       { name: Message.name, schema: MessageSchema },
       { name: Property.name, schema: PropertySchema },
     ]),

@@ -8,6 +8,18 @@ export enum UserRole {
   ADMIN = 'ADMIN',
 }
 
+/**
+ * Image Sub Schema
+ */
+@Schema({ _id: false })
+export class ImageItem {
+  @Prop({ required: true })
+  key!: string; // s3 object key
+
+  @Prop({ required: true })
+  image!: string;
+}
+
 @Schema({ timestamps: true, versionKey: false })
 export class User {
   @Prop({ required: true, trim: true })
@@ -23,9 +35,12 @@ export class User {
   @Prop({ enum: UserRole, default: UserRole.USER })
   role?: UserRole;
 
-  @Prop({ trim: true })
   // can upload image as file or provide image url
-  profileImage?: string;
+  @Prop({
+    type: ImageItem,
+    required: true,
+  })
+  profileImage!: ImageItem;
 
   @Prop({ required: false, unique: true, sparse: true, trim: true })
   phone?: string;
