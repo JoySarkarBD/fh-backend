@@ -44,11 +44,15 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
         .exec();
 
       if (!user) {
+        const googlePhotoUrl = profile.photos?.[0]?.value;
         user = new this.userModel({
           googleId: profile.id,
           name: profile.displayName || email.split('@')[0],
           email,
-          profileImage: profile.photos?.[0]?.value,
+          profileImage: {
+            key: googlePhotoUrl || 'google/default-profile-image',
+            image: googlePhotoUrl || 'https://via.placeholder.com/150',
+          },
           role: UserRole.USER,
           password: '',
         });
@@ -57,7 +61,10 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
       } else if (!user.googleId) {
         user.googleId = profile.id;
         if (!user.profileImage && profile.photos?.[0]?.value) {
-          user.profileImage = profile.photos[0].value;
+          user.profileImage = {
+            key: profile.photos[0].value,
+            image: profile.photos[0].value,
+          };
         }
         await user.save();
       }
