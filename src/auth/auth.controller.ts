@@ -56,24 +56,17 @@ export class AuthController {
   googleCallback(@Req() req: Request & { user: any }, @Res() res: Response) {
     const { accessToken, user } = req.user;
 
-    // Set cookie
-    res.setHeader(
-      'Set-Cookie',
-      `accessToken=${accessToken}; HttpOnly; Path=/; Max-Age=86400; SameSite=Lax${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`,
-    );
-
     // Get frontend URL
     const frontendUrl =
       process.env.FRONTEND_BASE_URL || 'http://localhost:3000';
 
-    // DIRECT REDIRECT based on role
     const userRole = user.role?.toLowerCase() || 'user';
 
-    if (userRole === 'admin') {
-      return res.redirect(`${frontendUrl}/admin`);
-    } else {
-      return res.redirect(`${frontendUrl}/dashboard/profile`);
-    }
+    // Redirect to frontend callback page with token so it can be stored
+    // as an accessible (non-HttpOnly) cookie, consistent with the normal login flow
+    return res.redirect(
+      `${frontendUrl}/google/callback?token=${encodeURIComponent(accessToken)}&role=${userRole}`,
+    );
   }
 
   @UseGuards(JwtAuthGuard)

@@ -72,6 +72,12 @@ export class UserService {
         : profileImage.image || profileImage;
     }
 
+    // If the key is already an external URL (e.g. Google profile picture),
+    // return it directly without trying to generate an S3 signed URL
+    if (key.startsWith('http://') || key.startsWith('https://')) {
+      return key;
+    }
+
     try {
       return await this.awsService.generateSignedUrl(key);
     } catch {
