@@ -1,10 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { CreateContactDto } from './dto/create-contact.dto';
-import { MailService } from 'src/mail/mail.service';
-import { config } from 'src/config/app.config';
 import { InjectModel } from '@nestjs/mongoose';
-import { Contact, ContactDocument } from 'src/schemas/contact.schema';
 import { Model } from 'mongoose';
+import { config } from 'src/config/app.config';
+import { MailService } from 'src/mail/mail.service';
+import { Contact, ContactDocument } from 'src/schemas/contact.schema';
+import { CreateContactDto } from './dto/create-contact.dto';
 
 @Injectable()
 export class ContactService {
@@ -42,20 +42,25 @@ export class ContactService {
       </div>
     `;
 
-    // Send email to admin/support
-    try {
-      const info = await this.mailService.sendMail({
-        to: config.CONTACT_RECEIVER_EMAIL, // set this in your config
+    // Queue the email in the background so API response is not blocked by SMTP.
+    void this.mailService
+      .enqueueMail({
+        to: config.CONTACT_RECEIVER_EMAIL,
         subject,
         html,
-        text: message, // optional plain text
+        text: message,
+      })
+      .catch((error: unknown) => {
+        const stack = error instanceof Error ? error.stack : String(error);
+        this.logger.error('Failed to enqueue contact email', stack);
       });
 
-      this.logger.log(`Contact email sent successfully: ${info.messageId}`);
-      return { success: true, messageId: info.messageId };
-    } catch (error) {
-      this.logger.error('Failed to send contact email', error);
-      throw error;
-    }
+    return {
+      message:
+        'Contact request received. Email queued for background delivery.',
+      data: {
+        queued: true,
+      },
+    };
   }
 }

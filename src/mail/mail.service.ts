@@ -20,30 +20,61 @@ export class MailService {
     });
   }
 
+  /**
+   * Queues a single email for background processing.
+   *
+   * Intended for API paths that should return immediately while a worker
+   * sends the actual SMTP email asynchronously.
+   */
   async sendMail(options: {
     to: string;
     subject: string;
     html: string;
     text?: string;
   }) {
+    await this.enqueueMail(options);
+
+    return {
+      success: true,
+      queued: true,
+      to: options.to,
+    };
+  }
+
+  /**
+   * Sends an email immediately via SMTP.
+   *
+   * This should only be called by background consumers, not API handlers.
+   */
+  async sendMailDirect(options: {
+    to: string;
+    subject: string;
+    html: string;
+    text?: string;
+  }) {
     try {
-      this.logger.log(`Attempting to send email to: ${options.to} with subject: ${options.subject}`);
+      this.logger.log(
+        `Attempting to send email to: ${options.to} with subject: ${options.subject}`,
+      );
       const info = await this.transporter.sendMail({
         from: `"${process.env.MAIL_FROM_NAME}" <${process.env.MAIL_FROM_EMAIL}>`,
         ...options,
       });
 
-      this.logger.log(`Email sent successfully to ${options.to}. Message ID: ${info.messageId}`);
+      this.logger.log(
+        `Email sent successfully to ${options.to}. Message ID: ${info.messageId}`,
+      );
       return info;
     } catch (error) {
-      this.logger.error(`Email sending failed for ${options.to}`, error.stack);
+      const stack = error instanceof Error ? error.stack : String(error);
+      this.logger.error(`Email sending failed for ${options.to}`, stack);
       throw error;
     }
   }
 
   /**
    * Send bulk mail by queueing individual email jobs.
-   * This offloads the work to the RabbitMQ workers.
+   * This returns immediately while workers process SMTP delivery in the background.
    */
   async sendBulkMail(options: {
     to: string[];
@@ -53,10 +84,12 @@ export class MailService {
   }) {
     const { to, ...rest } = options;
 
-    // Wait for all emails to be queued before returning
-    await Promise.all(
-      to.map((email) => this.enqueueMail({ to: email, ...rest })),
-    );
+    for (const email of to) {
+      void this.enqueueMail({ to: email, ...rest }).catch((error: unknown) => {
+        const stack = error instanceof Error ? error.stack : String(error);
+        this.logger.error(`Failed to enqueue bulk email for ${email}`, stack);
+      });
+    }
 
     this.logger.log(
       `Bulk mail requested: ${to.length} emails queued for processing.`,
@@ -75,9 +108,17 @@ export class MailService {
     retryCount?: number;
   }) {
     try {
-      this.client.emit('send_mail', data);
+      // Ensure the publish Observable is actually executed.
+      await new Promise<void>((resolve, reject) => {
+        this.client.emit('send_mail', data).subscribe({
+          next: () => resolve(),
+          complete: () => resolve(),
+          error: (error: unknown) => reject(error),
+        });
+      });
     } catch (error) {
-      this.logger.error('Failed to enqueue email', error);
+      const stack = error instanceof Error ? error.stack : String(error);
+      this.logger.error('Failed to enqueue email', stack);
       throw error;
     }
   }
