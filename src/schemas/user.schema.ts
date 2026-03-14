@@ -60,6 +60,12 @@ export class User {
   @Prop({ required: false, select: false })
   password?: string;
 
+  @Prop({ required: false, select: false })
+  resetPasswordToken?: string;
+
+  @Prop({ required: false, select: false })
+  resetPasswordExpires?: Date;
+
   @Prop({ trim: true })
   websiteLink?: string;
 
