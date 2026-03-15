@@ -93,17 +93,26 @@ export class User {
   @Prop({ type: [{ type: 'ObjectId', ref: 'Property' }], default: [] })
   propertyOwn?: Array<any>;
 
+  @Prop({ default: 0 })
+  propertyOwnCount?: number;
+
   /**
    * Properties bought by the user
    */
   @Prop({ type: [{ type: 'ObjectId', ref: 'Property' }], default: [] })
   propertyBuy?: Array<any>;
 
+  @Prop({ default: 0 })
+  propertyBuyCount?: number;
+
   /**
    * Properties sold by the user
    */
   @Prop({ type: [{ type: 'ObjectId', ref: 'Property' }], default: [] })
   propertySell?: Array<any>;
+
+  @Prop({ default: 0 })
+  propertySellCount?: number;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);
