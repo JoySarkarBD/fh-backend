@@ -69,6 +69,14 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
         await user.save();
       }
 
+      if (user.isSuspended) {
+        return done(null, {
+          error: 'suspended',
+          message:
+            'Your account has been suspended. Please contact support for assistance.',
+        });
+      }
+
       const token = await this.jwtService.signAsync({
         sub: String(user._id),
         email: user.email,

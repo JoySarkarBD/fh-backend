@@ -95,6 +95,56 @@ export class UserService {
     }
   }
 
+  private async notifyUserSuspensionStatus(payload: {
+    targetName?: string;
+    targetEmail?: string;
+    isSuspended: boolean;
+  }) {
+    if (!payload.targetEmail) {
+      return;
+    }
+
+    const subject = payload.isSuspended
+      ? 'Your account has been suspended'
+      : 'Your account has been reactivated';
+
+    const text = payload.isSuspended
+      ? `Hello ${payload.targetName || 'User'}, your Farrior Homes account has been suspended. If you believe this is a mistake, please contact support.`
+      : `Hello ${payload.targetName || 'User'}, your Farrior Homes account suspension has been removed. You can now log in again.`;
+
+const html = payload.isSuspended
+  ? `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
+      <h2 style="color: #c26828; margin-top: 0;">Account Status Update</h2>
+      <p>Hello ${payload.targetName || 'User'},</p>
+      <p>Your Farrior Homes account has been <strong style="color: #dc2626;">suspended</strong>.</p>
+      <p>If you believe this is a mistake, please contact support.</p>
+    </div>
+  `
+  : `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
+      <h2 style="color: #c26828; margin-top: 0;">Account Status Update</h2>
+      <p>Hello ${payload.targetName || 'User'},</p>
+      <p>Your Farrior Homes account has been <strong style="color: #059669;">reactivated</strong>.</p>
+      <p>You can now log in to your account again.</p>
+    </div>
+  `;
+
+    try {
+      await this.mailService.sendMail({
+        to: payload.targetEmail,
+        subject,
+        text,
+        html,
+      });
+    } catch (error) {
+      console.error(
+        '[USER-NOTIFY] Failed to send suspension status email:',
+        error,
+      );
+    }
+  }
+
   private getImageKey(profileImage?: ImageItem | string): string | undefined {
     if (!profileImage) return profileImage;
 
@@ -515,11 +565,19 @@ export class UserService {
       throw new NotFoundException('User not found after update');
     }
 
-    await this.notifyAdminsSuspiciousActivity({
-      targetName: updatedUser.name,
-      targetEmail: updatedUser.email,
-      isSuspended: Boolean(updatedUser.isSuspended),
-    });
+    // Trigger notifications in the background to keep admin action fast.
+    void Promise.allSettled([
+      this.notifyAdminsSuspiciousActivity({
+        targetName: updatedUser.name,
+        targetEmail: updatedUser.email,
+        isSuspended: Boolean(updatedUser.isSuspended),
+      }),
+      this.notifyUserSuspensionStatus({
+        targetName: updatedUser.name,
+        targetEmail: updatedUser.email,
+        isSuspended: Boolean(updatedUser.isSuspended),
+      }),
+    ]);
 
     return {
       message: `User ${updatedUser.isSuspended ? 'suspended' : 'unsuspended'} successfully`,

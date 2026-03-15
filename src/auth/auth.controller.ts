@@ -1,26 +1,25 @@
 import {
-  Req,
-  UseGuards,
-  Controller,
-  Get,
-  Post,
-  Body,
-  Patch,
-  Res,
+    Body,
+    Controller,
+    Get,
+    Patch,
+    Post,
+    Req,
+    Res,
+    UseGuards,
 } from '@nestjs/common';
-import { Request } from 'express';
 import type { Response } from 'express';
-import { AuthService } from './auth.service';
-import { CreateAuthDto } from './dto/create-auth.dto';
-import { LoginAuthDto } from './dto/login-auth.dto';
-import { JwtAuthGuard } from './guards/jwt-auth.guard';
-import { CurrentUser } from './decorators/current-user.decorator';
-import { GoogleAuthGuard } from './guards/google-auth.guard';
-import { UserIdDto } from 'src/common/dto/mongoId.dto';
-import { ChangePasswordDto } from './dto/change-password.dto';
+import { Request } from 'express';
 import type { AuthUser } from 'src/common/interface/auth-user.interface';
+import { AuthService } from './auth.service';
+import { CurrentUser } from './decorators/current-user.decorator';
+import { ChangePasswordDto } from './dto/change-password.dto';
+import { CreateAuthDto } from './dto/create-auth.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { LoginAuthDto } from './dto/login-auth.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { GoogleAuthGuard } from './guards/google-auth.guard';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
 
 @Controller('auth')
 export class AuthController {
@@ -66,11 +65,26 @@ export class AuthController {
   @UseGuards(GoogleAuthGuard)
   @Get('google/callback')
   googleCallback(@Req() req: Request & { user: any }, @Res() res: Response) {
-    const { accessToken, user } = req.user;
+    const { accessToken, user, error, message } = req.user || {};
 
     // Get frontend URL
     const frontendUrl =
       process.env.FRONTEND_BASE_URL || 'http://localhost:3000';
+
+    if (error === 'suspended') {
+      const text =
+        typeof message === 'string' && message.trim().length > 0
+          ? message
+          : 'Your account has been suspended. Please contact support for assistance.';
+
+      return res.redirect(
+        `${frontendUrl}/login?googleError=suspended&message=${encodeURIComponent(text)}`,
+      );
+    }
+
+    if (!accessToken || !user) {
+      return res.redirect(`${frontendUrl}/login?googleError=failed`);
+    }
 
     const userRole = user.role?.toLowerCase() || 'user';
 

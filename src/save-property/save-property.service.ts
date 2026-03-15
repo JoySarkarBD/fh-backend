@@ -9,6 +9,7 @@ import { AwsService } from 'src/common/aws/aws.service';
 import { AuthUser } from 'src/common/interface/auth-user.interface';
 import { Property, PropertyStatus } from 'src/schemas/property.schema';
 import { SaveProperty } from 'src/schemas/save-property.schema';
+import { User, UserDocument } from 'src/schemas/user.schema';
 
 @Injectable()
 export class SavePropertyService {
@@ -17,6 +18,8 @@ export class SavePropertyService {
     private readonly savePropertyModel: Model<SaveProperty>,
     @InjectModel(Property.name)
     private readonly propertyModel: Model<Property>,
+    @InjectModel(User.name)
+    private readonly userModel: Model<UserDocument>,
     private readonly awsService: AwsService,
   ) {}
 
@@ -164,24 +167,32 @@ export class SavePropertyService {
   async getOverview(user: AuthUser) {
     const userObjectId = new Types.ObjectId(user.userId);
 
-    const [ownCount, buyCount, sellCount, rentCount, savedCount, sellingPostCount, recentSaved] =
+    // Fetch the user document so we can read the property arrays
+    const userDoc = await this.userModel
+      .findById(userObjectId)
+      .select('propertyOwn propertyBuy propertySell')
+      .lean();
+
+    // ownCount  — every property this user has created/listed
+    const ownCount = Array.isArray(userDoc?.propertyOwn)
+      ? userDoc.propertyOwn.length
+      : 0;
+
+    const [sellCount, rentCount, savedCount, sellingPostCount, recentSaved] =
       await Promise.all([
-        this.propertyModel.countDocuments({
-          propertyOwner: userObjectId,
-        }),
-        this.propertyModel.countDocuments({
-          propertyOwner: userObjectId,
-          status: PropertyStatus.SOLD,
-        }),
+        // sellCount — user's own properties currently listed FOR SALE
         this.propertyModel.countDocuments({
           propertyOwner: userObjectId,
           status: PropertyStatus.SALE,
         }),
+        // rentCount — user's own properties listed FOR RENT
         this.propertyModel.countDocuments({
           propertyOwner: userObjectId,
           status: PropertyStatus.RENT,
         }),
+        // savedCount — bookmarked / saved properties
         this.savePropertyModel.countDocuments({ userId: userObjectId }),
+        // sellingPostCount — published selling posts
         this.propertyModel.countDocuments({
           propertyOwner: userObjectId,
           isPublished: true,
@@ -227,7 +238,6 @@ export class SavePropertyService {
     return {
       stats: {
         ownCount,
-        buyCount,
         sellCount,
         rentCount,
         savedCount,
