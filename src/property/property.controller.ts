@@ -115,6 +115,10 @@ export class PropertyController {
     }
   }
 
+  @Get('/topFour')
+  topFourProperty(){
+    return this.propertyService.topFourProperty()
+  }
   @UseGuards(OptionalJwtAuthGuard)
   @Get()
   findAll(@CurrentUser() user: AuthUser, @Query() query: Record<string, any>) {
@@ -231,4 +235,6 @@ export class PropertyController {
   remove(@Param() param: MongoIdDto, @CurrentUser() user: AuthUser) {
     return this.propertyService.remove(param.id, user);
   }
+
 }
+
