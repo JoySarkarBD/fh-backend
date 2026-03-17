@@ -1298,4 +1298,51 @@ export class PropertyService {
 
     return deleted;
   }
+
+async topFourProperty() {
+  const page = 1;
+  const limit = 4;
+  const total = await this.propertyModel.countDocuments();
+
+  const properties = await this.propertyModel
+    .find()
+    .sort({ createdAt: -1 }) // newest first
+    .limit(limit) // only 4 items
+    .lean();
+
+  const propertiesWithSignedUrls = await Promise.all(
+    properties.map(async (prop: any) => {
+      const images = await Promise.all(
+        (prop.images || []).map(async (img: any) => {
+          if (!img?.key) return null;
+
+          return {
+            key: img.key,
+            image: await this.awsService.generateSignedUrl(img.key),
+          };
+        }),
+      );
+      let thumbnail: { key: string; image: string } | null = null;
+
+      if (prop?.thumbnail?.key) {
+        thumbnail = {
+          key: prop.thumbnail.key,
+          image: await this.awsService.generateSignedUrl(prop.thumbnail.key),
+        };
+      }
+
+      return { ...prop, images, thumbnail };
+    }),
+  );
+
+  return {
+    meta: {
+      page,
+      limit,
+      total,
+      totalPage: Math.ceil(total / limit),
+    },
+    data: propertiesWithSignedUrls,
+  };
+}
 }
